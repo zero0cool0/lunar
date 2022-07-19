@@ -115,7 +115,7 @@ all: add_off$(EXE) adestest$(EXE) astcheck$(EXE) astephem$(EXE) \
    colors2$(EXE) cosptest$(EXE) csv2ades$(EXE) dist$(EXE) \
    easter$(EXE) get_test$(EXE) gtest$(EXE) htc20b$(EXE) jd$(EXE)\
    jevent$(EXE) jpl2b32$(EXE) jsattest$(EXE) lun_test$(EXE) \
-   marstime$(EXE) moidtest$(EXE) mpc2sof$(EXE) oblitest$(EXE) \
+   marstime$(EXE) moidtest$(EXE) mpc2sof$(EXE) mpc_time$(EXE) oblitest$(EXE) \
    persian$(EXE) parallax$(EXE) parallax.cgi phases$(EXE) \
    prectest$(EXE) prectes2$(EXE) ps_1996$(EXE) ssattest$(EXE) \
    tables$(EXE) test_des$(EXE) test_ref$(EXE) testprec$(EXE) \
@@ -166,7 +166,7 @@ uninstall:
 	$(CC) $(CFLAGS) -c $<
 
 OBJS= alt_az.o ades2mpc.o astfuncs.o big_vsop.o  \
-   brentmin.o cgi_func.o classel.o cospar.o date.o  \
+   brentmin.o cgi_func.o classel.o conbound.o cospar.o date.o  \
    delta_t.o de_plan.o dist_pa.o eart2000.o elp82dat.o \
    eop_prec.o getplane.o get_time.o jsats.o lunar2.o miscell.o moid.o \
    mpc_code.o mpc_fmt.o nutation.o obliquit.o pluto.o precess.o showelem.o \
@@ -243,7 +243,7 @@ get_test$(EXE): get_test.o $(LIBLUNAR)
 	$(CC) $(CFLAGS) -o get_test$(EXE) get_test.o $(LIBLUNAR) $(LIBSADDED)
 
 gtest$(EXE): gtest.c
-	$(CC) $(FLAGS) -o gtest$(EXE) gtest.c $(LIBSADDED)
+	$(CC) $(CFLAGS) -o gtest$(EXE) gtest.c $(LIBSADDED)
 
 htc20b$(EXE): htc20b.cpp $(LIBLUNAR)
 	$(CC) $(CFLAGS) -o htc20b$(EXE) -DTEST_MAIN htc20b.cpp $(LIBLUNAR) $(LIBSADDED)
@@ -336,7 +336,10 @@ test_min$(EXE):                    test_min.o brentmin.o
 	$(CC) $(CFLAGS) -o test_min$(EXE) test_min.o brentmin.o $(LIBSADDED)
 
 them_cat$(EXE): them_cat.c
-	$(CC) $(FLAGS) -o them_cat$(EXE) them_cat.c
+	$(CC) $(CFLAGS) -o them_cat$(EXE) them_cat.c
+
+mpc_time$(EXE):                    mpc_time.c $(LIBLUNAR)
+	$(CC) $(CFLAGS) -o mpc_time$(EXE) mpc_time.c $(LIBLUNAR) $(LIBSADDED)
 
 themis$(EXE):                    themis.o $(LIBLUNAR)
 	$(CC) $(CFLAGS) -o themis$(EXE) themis.o $(LIBLUNAR) $(LIBSADDED)
