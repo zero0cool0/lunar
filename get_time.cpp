@@ -309,7 +309,17 @@ static long double get_phase_time( const long double k, const int phase_idx)
    return( rval);
 }
 
-static long double set_from_lunar( const int phase_idx, const long double t2k)
+#ifdef __cplusplus
+extern "C" {
+#endif /* #ifdef __cplusplus */
+long double DLL_FUNC find_nearest_lunar_phase_time(
+                         const int phase_idx, const long double t2k);
+#ifdef __cplusplus
+}
+#endif  /* #ifdef __cplusplus */
+
+long double DLL_FUNC find_nearest_lunar_phase_time(
+                         const int phase_idx, const long double t2k)
 {
    const long double phase = (long double)phase_idx * .25;
    const long double k = floorl((t2k - lunar_phase_t0) / lunation - phase + .5) + phase;
@@ -405,7 +415,7 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
    char buff[80];
    char symbol = 0;
    char *str = buff;
-   const double jan_1_1970 = 2440587.5;      /* starting point for UNIX time */
+   const long double jan_1_1970 = 2440587.5;      /* starting point for UNIX time */
 
    if( is_ut)
       *is_ut = 0;
@@ -449,7 +459,7 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
          rval = get_time_from_stringl( initial_t2k, str, time_format, NULL);
          if( rval != -J2000 && is_ut)
             *is_ut = 1;
-         return( set_from_lunar( phase, rval) + offset);
+         return( find_nearest_lunar_phase_time( phase, rval) + offset);
          }
       }
 
@@ -491,12 +501,10 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
 
    if( !strncmp( str, "now", 3))
       {
-      static const long double jan_1970 = 2440587.5;
-
       str += 3;
       while( *str == ' ')
          str++;
-      initial_t2k = (jan_1970 - J2000) + (long double)time( NULL) / seconds_per_day;
+      initial_t2k = jan_1_1970 - J2000 + (long double)time( NULL) / seconds_per_day;
       }
 
    if( !*str)
@@ -608,7 +616,7 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
          {
          unsigned month_found = 0, n_fields_found = 2;
          unsigned year_found = 0, day_found = 0;
-         char tstr[80];
+         char tstr[80], *end_ptr;
          long double ivals[3];
 
          memcpy( tstr, str, (size_t)i);
@@ -622,9 +630,11 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
             }
          else
             {
-            ivals[0] = strtold( tstr, NULL);
+            ivals[0] = strtold( tstr, &end_ptr);
             if( strchr( tstr, '.'))   /* decimal day given */
                day_found = 1;
+            if( end_ptr == tstr && is_ut)
+               *is_ut = -4;
             }
          str += i + 1;
          for( i = 0; str[i] && str[i] != symbol && str[i] != ' '; i++)
@@ -640,15 +650,18 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
             }
          else
             {
-            ivals[1] = strtold( tstr, NULL);
+            ivals[1] = strtold( tstr, &end_ptr);
             if( strchr( tstr, '.'))   /* decimal day given */
                day_found = 2;
+            if( end_ptr == tstr && is_ut)
+               *is_ut = -5;
             }
 
          if( *str == symbol)     /* maybe a third field was entered, but */
             {                       /* could be a time;  check for a ':' */
             str++;
             if( sscanf( str, "%79s", tstr) == 1)
+               {
                if( (ival = month_name_to_index( tstr)) != 0)
                   {
                   month_found = 3;
@@ -656,6 +669,13 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
                   ivals[2] = (long double)ival;
                   str += strlen( tstr);
                   }
+               else        /* check to make sure it's a number */
+                  {
+                  strtold( str, &end_ptr);
+                  if( end_ptr == str && is_ut)
+                     *is_ut = -6;
+                  }
+               }
             if( n_fields_found == 2)
                if( sscanf( str, "%Lf%n", &ivals[2], &n_bytes) == 1)
                   if( str[n_bytes] != ':')
@@ -773,7 +793,13 @@ long double DLL_FUNC get_time_from_stringl( long double initial_t2k,
 
          if( year > 0 && year < 100 && !is_bc)
             if( time_format & FULL_CTIME_TWO_DIGIT_YEAR)
-               year += (year < 40 ? 2000 : 1900);
+               {
+               const int curr_year = 1970 + (int)( time( NULL) / (1461 * 86400 / 4));
+                                  /* two-digit years are assumed to be  */
+               year += 1900;      /* between 60 years ago to 40 years hence */
+               while( year < curr_year - 60)
+                  year += 100;
+               }
          }
          break;
       case '\0':       /* no dividing symbols found */

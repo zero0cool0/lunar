@@ -17,7 +17,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 02110-1301, USA.    */
 
-/* A little test program I wrote to test out my implementation of Lieske's E5
+/*  NOTE that 'ssattest' now provides testing of Galilean satellite
+ephems,  as well as Saturnian satellite ephems.  The following
+program is not entirely obsolete,  but it's close to it.
+
+   A little test program I wrote to test out my implementation of Lieske's E5
 theory of the Galilean satellites,  as written in 'jsats.cpp'.  It works by
 reading in an ASCII ephemeris of Jovicentric vectors for a given satellite,
 computing the position for that satellite at that time using E5,  and showing
@@ -46,15 +50,16 @@ int main( const int argc, const char **argv)
    char buff[100];
    FILE *ifile;
    time_t t0 = time( NULL);
+   const int sat_number = (argc == 2 ? atoi( argv[1]) : 0);
 
-   if( argc != 2)
+   if( sat_number < 1 || sat_number > 4)
       {
       printf( "'jsattest' needs a command-line argument from 1 to 4,\n");
       printf( "corresponding to the number of the Galilean satellite\n");
       printf( "that is being tested.\n");
       return( -1);
       }
-   sprintf( buff, "j%s.txt", argv[1]);
+   snprintf( buff, 7, "j%s.txt", argv[1]);
    ifile = fopen( buff, "rb");
    if( !ifile)
       {
@@ -62,14 +67,14 @@ int main( const int argc, const char **argv)
       return( -1);
       }
    printf( "All data in kilometers,  in J2000 ecliptic coords\n");
-   printf( "Compiled %s %s; run %s", __DATE__, __TIME__, ctime( &t0));
+   printf( "Compiled %s %s; run %.24s\n", __DATE__, __TIME__, asctime( gmtime( &t0)));
    printf( "   JDE         dx        dy        dz             ");
    printf( "x          y          z         radial    along\n");
    while( fgets( buff, sizeof( buff), ifile))
       if( strlen( buff) > 56 && !memcmp( buff + 37, "00:00:00.0000 (CT)", 18))
          {
          const double jd = atof( buff );
-         double loc[15], *tptr = loc + atoi( argv[1]) * 3 - 3;
+         double loc[15], *tptr = loc + (sat_number - 1) * 3;
          double precess_matrix[9];
          double j2000_loc[3], x, y, z, r;
 

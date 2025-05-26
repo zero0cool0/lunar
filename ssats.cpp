@@ -60,6 +60,7 @@ of Saturn (and other planets).
 #define J2000 2451545.
 
 #define OBLIQUITY_1950 (23.445792 * PI / 180.)
+#define OBLIQUITY_2000 ((23. + 26. / 60. + 21.448 / 3600.) * PI / 180.)
             /* Constants defining the angle of a 'fixed' Saturnian equator */
             /* relative to the B1950.0 ecliptic.  The inner four moons are */
             /* all computed relative to the plane of Saturn's equator; you */
@@ -92,7 +93,6 @@ SAT_ELEMS
    {
    double jd, semimaj, ecc, gamma, lambda;
    double omega, Omega, epoch;
-   double loc[4];
    int sat_no;
    };
 
@@ -495,25 +495,19 @@ Enceladus, Tethys,  or Rhea),  you have to rotate it from Saturn's
 equator to B1950.
 
    At that point,  you've got B1950 ecliptic coordinates,  which are
-then rotated to B1950 equatorial coordinates.  The default then is
-to precess them to equatorial coordinates of date;  then rotate back
-to ecliptic coordinates of date,  and you're all set.  That's just
-because Meeus' formulae formulae are all in ecliptic coords of date,
-and it was convenient to go for consistency with the rest of my
-existing code.
+then rotated to B1950 equatorial coordinates.  These are precessed to
+J2000 equatorial,  then rotated back to J2000 ecliptic coordinates.
 
-   HOWEVER,  if you #define OUTPUT_IN_J2000,  then the vector will
-instead get precessed to equatorial J2000,  then rotated to ecliptic
-J2000.
-*/
+   Meeus' formulae are all in ecliptic coords of date.  At one point,
+I followed suit,  but have generally preferred an inertial reference
+frame,  and use that here.                                    */
 
 int DLL_FUNC calc_ssat_loc( const double t, double DLLPTR *ssat,
                                 const int sat_wanted, const long precision)
 {
    SAT_ELEMS elems;
    ELEMENTS orbit;
-   double matrix[9];
-   const double t_years = (t - J2000) / 365.25;
+   double matrix[9], loc[4];
 
    if( precision == -1L)         /* just checking version # */
       return( 1);
@@ -524,30 +518,31 @@ int DLL_FUNC calc_ssat_loc( const double t, double DLLPTR *ssat,
    set_ssat_elems( &elems, &orbit);
 
    setup_orbit_vectors( &orbit);
-   comet_posn_part_ii( &orbit, IGNORED_DOUBLE, elems.loc, NULL);
+   comet_posn_part_ii( &orbit, IGNORED_DOUBLE, loc, NULL);
 
    if( sat_wanted < RHEA)    /* inner 4 satellites are returned in Saturnic */
       {                            /*  coords so gotta rotate to B1950.0 */
-      rotate_vector( elems.loc, INCL0, 0);
-      rotate_vector( elems.loc, ASC_NODE0, 2);
+      rotate_vector( loc, INCL0, 0);
+      rotate_vector( loc, ASC_NODE0, 2);
       }
-                        /* After above,  elems.loc is ecliptic 1950 coords */
-   rotate_vector( elems.loc, OBLIQUITY_1950, 0);
-                        /* Now,  elems.loc is equatorial 1950 coords */
+                        /* After above,  loc is ecliptic 1950 coords */
+   rotate_vector( loc, OBLIQUITY_1950, 0);
+                        /* Now,  loc is equatorial 1950 coords */
 
-#ifdef OUTPUT_IN_J2000
    setup_precession( matrix, 1950., 2000);
-   precess_vector( matrix, elems.loc, ssat);
+   precess_vector( matrix, loc, ssat);
                         /* Now,  ssats is equatorial J2000... */
    rotate_vector( ssat, -OBLIQUITY_2000, 0);
                         /* And now,  ssats is ecliptical J2000 */
-#else
+#ifdef CODE_FOR_EPOCH_OF_DATE
+            /* The original version of this code provided epoch
+               of date coordinates,  to match Meeus' code.  I can't
+               come up with a good reason to do that.       */
    setup_precession( matrix, 1950., 2000. + t_years);
-   precess_vector( matrix, elems.loc, ssat);
+   precess_vector( matrix, loc, ssat);
                         /* Now,  ssats is equatorial of epoch coords */
    rotate_vector( ssat, -mean_obliquity( t_years / 100.), 0);
                         /* And now,  ssats is ecliptical of epoch coords */
-                        /* (which is what we really want anyway) */
 #endif
    return( 0);
 }

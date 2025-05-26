@@ -15,29 +15,11 @@ along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 02110-1301, USA. */
 
-/* These macros determine the MJD of the given date in 'YEAR'.         */
-/* They're valid for _non-negative_ years in the _Gregorian_ calendar. */
-/* Some are not used here,  and therefore commented out,  just to      */
-/* avoid compiler warnings.                                            */
-
-#define JAN_1( YEAR) (((YEAR) * 365 + ((YEAR) - 1) / 4 - ((YEAR) - 1) / 100 \
-                         + ((YEAR) - 1) / 400) - 678940)
-// #define FEB_1( YEAR) (JAN_1( YEAR) + 31)
-#define MAR_1( YEAR) (((YEAR)*365 + (YEAR)/4 - (YEAR)/100 + (YEAR)/400) - 678881)
-#define APR_1( YEAR) (MAR_1( YEAR) + 31)
-#define MAY_1( YEAR) (APR_1( YEAR) + 30)
-#define JUN_1( YEAR) (MAY_1( YEAR) + 31)
-#define JUL_1( YEAR) (JUN_1( YEAR) + 30)
-// #define AUG_1( YEAR) (JUL_1( YEAR) + 31)
-// #define SEP_1( YEAR) (AUG_1( YEAR) + 31)
-// #define OCT_1( YEAR) (SEP_1( YEAR) + 30)
-// #define NOV_1( YEAR) (OCT_1( YEAR) + 31)
-// #define DEC_1( YEAR) (NOV_1( YEAR) + 30)
-
 #include <stdio.h>
 #include <stdlib.h>
 #include "watdefs.h"
 #include "afuncs.h"
+#include "mjd_defs.h"
 
 int main( const int argc, const char **argv)
 {

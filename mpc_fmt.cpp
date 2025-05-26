@@ -25,6 +25,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 #include "afuncs.h"
 #include "date.h"
 #include "mpc_func.h"
+#include "stringex.h"
 
 #if defined(_MSC_VER) && _MSC_VER < 1900
 int snprintf( char *string, const size_t max_len, const char *format, ...);
@@ -45,6 +46,16 @@ bool is_valid_mpc_code( const char *mpc_code)
    return( true);
 }
 
+double quick_atof( const char *ibuff);       /* mpc_func.cpp */
+
+static inline int quick_atoi( const char *iptr)
+{
+   int rval = 0;
+
+   while( *iptr >= '0' && *iptr <= '9')
+      rval = (rval * 10) + (*iptr++ - '0');
+   return( rval);
+}
 
 static inline int get_two_digits( const char *iptr)
 {
@@ -185,16 +196,16 @@ double extract_date_from_mpc_report( const char *buff, unsigned *format)
       if( (digits_mask & 0x3ff) == 0x36f    /* i.e.,  'dddd dd dd' */
                             && tbuff[7] == ' ' && tbuff[10] == '.')
          {
-         int divisor = 1;
+         int divisor = 1000000;
 
-         year = atoi( tbuff);
+         year = quick_atoi( tbuff);
          month = get_two_digits( tbuff + 5);
 //       rval = atof( tbuff + 8);
                      /* atof( ) is a little slow,  so we use a little more */
-         for( i = 11; i < 17 && tbuff[i] != ' '; i++)  /* code in exchange */
-            divisor *= 10;                             /* for better speed */
+         for( i = 16; i > 11 && tbuff[i] == ' '; i--)  /* code in exchange */
+            divisor /= 10;                             /* for better speed */
          rval = (double)get_two_digits( tbuff + 8) +
-                           (double)atoi( tbuff + 11) / (double)divisor;
+                           (double)quick_atoi( tbuff + 11) / (double)divisor;
          format_found = 0;
          start_of_decimals = 11;
          }
@@ -345,7 +356,7 @@ static double get_ra_dec( const char *ibuff, int *format, double *precision)
       ibuff++;
    memcpy( buff, ibuff, 12);
    buff[12] = '\0';
-   rval = atof( buff);
+   rval = quick_atof( buff);
    while( isdigit( buff[i]))
       i++;
    if( i > 7)        /* "packed" highly precise RA/decs described above */
@@ -385,10 +396,10 @@ static double get_ra_dec( const char *ibuff, int *format, double *precision)
       }
    else if( buff[2] == ' ' && i == 2)  /* zz mm(.mmm...) or zz mm ss(.sss...)  */
       {
-      rval += atof( buff + 3) / 60.;
+      rval += quick_atof( buff + 3) / 60.;
       if( buff[5] == ' ' && isdigit( buff[7]))  /* i.e., seconds are given */
          {
-         rval += atof( buff + 6) / 3600.;
+         rval += quick_atof( buff + 6) / 3600.;
          for( i = 9; i < 12 && isdigit( buff[i]); i++)
             n_digits++;
          *format = n_digits;
@@ -405,7 +416,7 @@ static double get_ra_dec( const char *ibuff, int *format, double *precision)
       {
       *precision = 1. / 15.;
       *format = 2;
-      rval += atof( buff + 4) / 60. + atof( buff + 7) / 3600.;
+      rval += quick_atof( buff + 4) / 60. + quick_atof( buff + 7) / 3600.;
       rval /= 15;
       for( i = 10; isdigit( buff[i]) && i < 12; i++)
          n_digits++;
@@ -506,6 +517,7 @@ static const char *net_codes[] = {
            "VGaia-DR2",
            "WGaia-DR3",
            "XGaia-EDR3",
+           "XGaia-3E",
            "YUCAC-5",
            "ZATLAS-2",
            NULL };
@@ -605,7 +617,10 @@ static int extract_roman_numeral( const char *str)
 }
 
 /* Packs desigs such as 'Uranus XXIV' or 'Earth I' or 'Saturn DCCXLVIII',
-or 'Uranus 24' or 'Earth 1' or 'Saturn 748'.  */
+or 'Uranus 24' or 'Earth 1' or 'Saturn 748'.  Packed designations are,
+including padding,  exactly twelve bytes long plus a null terminator. */
+
+#define PACKED_DESIG_LEN   13
 
 static int pack_permanent_natsat( char *packed, const char *fullname)
 {
@@ -625,7 +640,7 @@ static int pack_permanent_natsat( char *packed, const char *fullname)
             sat_number = extract_roman_numeral( fullname + len + 1);
          if( sat_number > 0 && sat_number < 1000)
             {
-            sprintf( packed, "%c%03dS       ", *fullname, sat_number);
+            snprintf_err( packed, PACKED_DESIG_LEN, "%c%03dS       ", *fullname, sat_number);
             return( (int)i);
             }
          }
@@ -646,7 +661,7 @@ static int pack_provisional_natsat( char *packed, const char *fullname)
 
       if( year > 1900 && year < 2100 && num > 0 && num < 620)
          {
-         sprintf( packed, "    S%c%02d%c%c%c0",
+         snprintf_err( packed, PACKED_DESIG_LEN, "    S%c%02d%c%c%c0",
                'A' + (year / 100) - 10, year % 100, fullname[7],
                      int_to_mutant_hex_char( num / 10),
                      '0' + num % 10);
@@ -654,6 +669,144 @@ static int pack_provisional_natsat( char *packed, const char *fullname)
          }
       }
    return( -1);
+}
+
+/* Some C/C++ libraries offer a function to convert a 64-bit int to
+a string.  Most don't.  Not hard to implement our own,  though. */
+
+inline void _int_to_a( char *obuff, uint64_t ival)
+{
+   int i = 0, j = 0;
+
+   if( !ival)
+      obuff[i++] = '0';
+   while( ival)
+      {
+      obuff[i++] = (char)( '0' + ival % 10);
+      ival /= 10;
+      }              /* gives us the string,  but backwards */
+   obuff[i--] = '\0';
+   while( i > j)
+      {
+      const char temp = obuff[i];
+
+      obuff[i--] = obuff[j];
+      obuff[j++] = temp;
+      }
+}
+
+inline void unpack_oversized_spacecraft_offset( char *obuff, const char *ibuff)
+{
+   uint64_t value = 0;
+   int i, decimal_loc = ibuff[1] - 'B';
+
+   *obuff++ = ibuff[0];       /* copy +/- sign */
+   for( i = 2; i < 11; i++)
+       value = value * 62 + mutant_hex_char_to_int( ibuff[i]);
+   _int_to_a( obuff, value);
+   if( decimal_loc >= 0)
+      {
+      obuff += decimal_loc;
+      memmove( obuff + 1, obuff, strlen( obuff) + 1);
+      *obuff = '.';
+      }
+}
+
+/* Returns either a negative value for an error code,  or the
+location of the decimal point for a valid coordinate */
+
+inline int get_satellite_coordinate( const char *iptr, double coord[1])
+{
+   const char sign_byte = *iptr;
+   char tbuff[16];
+   int rval = 0;
+
+   memcpy( tbuff, iptr, 11);
+   tbuff[11] = '\0';
+   if( sign_byte != '+' && sign_byte != '-')
+      {
+      rval = SATELL_COORD_ERR_BAD_SIGN;
+      *coord = atof( tbuff);
+      }
+   else
+      {
+      char *tptr;
+      int n_bytes_read;
+
+      if( iptr[1] >= 'A' && iptr[1] <= 'N')
+         {
+         unpack_oversized_spacecraft_offset( tbuff, iptr);
+         *coord = atof( tbuff);
+         rval = 99;
+         }
+      else
+         {
+         if( sscanf( tbuff + 1, "%lf%n", coord, &n_bytes_read) != 1
+                    || n_bytes_read < 7)
+            rval = SATELL_COORD_ERR_BAD_NUMBER;
+         else if( (tptr = strchr( tbuff, '.')) == NULL)
+            rval = SATELL_COORD_ERR_NO_DECIMAL;
+         else
+            rval = (int)( tptr - tbuff);
+         }
+      if( sign_byte == '-')
+         *coord = -*coord;
+      }
+   return( rval);
+}
+
+/* Returns spacecraft offset in AU,  in J2000 ecliptic coords */
+
+int DLL_FUNC get_satellite_offset( const char *iline, double xyz[3])
+{
+   size_t i;
+   int error_code = 0;
+   const int observation_units = (int)iline[32] - '0';
+   double r2 = 0.;
+   const double earth_radius_in_au = 6378.14 / AU_IN_KM;
+   const double min_radius = 1.01 * earth_radius_in_au;
+   const size_t slen = strlen( iline);
+
+   assert( 80 <= slen && slen < 83);  /* allow for LF, CR/LF, or no line end */
+   for( i = 0; i < 3; i++)    /* in case of error,  use 0 offsets */
+      xyz[i] = 0.;
+   iline += 34;      /* this is where the offsets start */
+   for( i = 0; i < 3; i++, iline += 12)
+      {
+      int decimal_loc;
+
+      decimal_loc = get_satellite_coordinate( iline, xyz + i);
+      if( decimal_loc < 0 && !error_code)
+         error_code = decimal_loc;
+      if( observation_units == 1)         /* offset given in km */
+         {
+         xyz[i] /= AU_IN_KM;
+         if( !error_code)
+            if( decimal_loc < 6 || decimal_loc > 10)
+               error_code = SATELL_COORD_ERR_DECIMAL_MISPLACED;
+         if( !error_code && xyz[i] == 0.)
+            error_code = SATELL_COORD_ERR_EXACTLY_ZERO;
+         }
+      else if( observation_units == 2)          /* offset in AU */
+         {                         /* offset must be less than 100 AU */
+         if( !error_code)
+            if( decimal_loc != 2 && decimal_loc != 3)
+               error_code = SATELL_COORD_ERR_DECIMAL_MISPLACED;
+         }
+      else if( !error_code)      /* don't know about this sort of offset */
+         error_code = SATELL_COORD_ERR_UNKNOWN_OFFSET;
+      if( decimal_loc == 99)     /* actually okay,  just a very long ADES */
+         error_code = 0;         /* spacecraft offset */
+      r2 += xyz[i] * xyz[i];
+      }
+               /* (275) geocentric occultation obs can have offsets  */
+               /* inside the earth.  All others ought to be at least */
+               /* slightly outside the atmosphere.                   */
+   if( !error_code && r2 < min_radius * min_radius)
+      if( !strcmp( iline + 77, "275"))
+         error_code = SATELL_COORD_ERR_INSIDE_EARTH;
+   equatorial_to_ecliptic( xyz);
+   return( error_code);
 }
 
 /* create_mpc_packed_desig( ) takes a "normal" name for a comet/asteroid,
@@ -681,7 +834,7 @@ int create_mpc_packed_desig( char *packed_desig, const char *obj_name)
    size_t i, j, len;
    int rval = -1;
    bool in_parentheses = false;
-   unsigned number;
+   unsigned number = 0;
    char comet_desig = 0;
    const unsigned max_number = 620000 + 62 * 62 * 62 * 62;
 
@@ -700,7 +853,7 @@ int create_mpc_packed_desig( char *packed_desig, const char *obj_name)
       }
                /* Check for comet-style desigs such as 'P/1995 O1' */
                /* and such.  Leading character can be P, C, X, D, or A. */
-   if( strchr( "PCXDA", *obj_name) && obj_name[1] == '/')
+   if( obj_name[1] == '/' && strchr( "PCXDA", *obj_name))
       {
       comet_desig = *obj_name;
       obj_name += 2;
@@ -708,10 +861,9 @@ int create_mpc_packed_desig( char *packed_desig, const char *obj_name)
 
    memset( packed_desig, ' ', 12);
    packed_desig[12] = '\0';
-   number = atoi( obj_name);
    i = 0;
    while( isdigit( obj_name[i]))
-      i++;
+      number = (number * 10) + (unsigned)( obj_name[i++] - '0');
    len = strlen( obj_name);
    if( in_parentheses)
       len--;
@@ -720,11 +872,22 @@ int create_mpc_packed_desig( char *packed_desig, const char *obj_name)
    if( i == len)        /* nothing but numbers */
       if( number > 0 && number < 1000000 && i >= 5)
          in_parentheses = true;
-   if( number > 0 && number < 10000 && obj_name[i] && !obj_name[i + 1]
+   if( number > 0 && number < 10000 && obj_name[i]
+                      && (!obj_name[i + 1] || obj_name[i + 1] == '-')
                              && strchr( "PDI", obj_name[i]))
       {        /* such as '297P',  '1I',  etc. */
       snprintf( packed_desig, 5, "%04d", number);
       packed_desig[4] = obj_name[i];
+      if( obj_name[i + 1] == '-' && isupper( obj_name[i + 2]))
+         {           /* fragment designation */
+         if( isupper( obj_name[i + 3]))  /* two-letter fragment */
+            {
+            packed_desig[10] = obj_name[i + 2] + 'a' - 'A';
+            packed_desig[11] = obj_name[i + 3] + 'a' - 'A';
+            }
+         else        /* single-letter fragment desig */
+            packed_desig[11] = obj_name[i + 2] + 'a' - 'A';
+         }
       return( 0);
       }
 
@@ -753,8 +916,7 @@ int create_mpc_packed_desig( char *packed_desig, const char *obj_name)
          }
 
       if( number < 6200)
-         snprintf( packed_desig + 5, 4, "%c%02d",
-                  int_to_mutant_hex_char( number / 100), number % 100);
+         packed_desig[5] = int_to_mutant_hex_char( number / 100);
       packed_desig[6] = obj_name[2];    /* decade */
       packed_desig[7] = obj_name[3];    /* year */
 
@@ -770,11 +932,30 @@ int create_mpc_packed_desig( char *packed_desig, const char *obj_name)
       else
          packed_desig[11] = '0';
 
-      sub_designator = atoi( obj_name + i);
-      if( sub_designator >= 0 && sub_designator < 620 && number < 6200)
+      sub_designator = quick_atoi( obj_name + i);
+      if( sub_designator >= 0 && number < 6200)
          {
-         packed_desig[10] = int_to_mutant_hex_char( sub_designator % 10);
-         packed_desig[9] = int_to_mutant_hex_char( sub_designator / 10);
+         if( sub_designator < 620)
+            {
+            packed_desig[10] = int_to_mutant_hex_char( sub_designator % 10);
+            packed_desig[9] = int_to_mutant_hex_char( sub_designator / 10);
+            }
+         else if( number >= 2000 && number < 2062)
+            {
+            int n = (sub_designator - 620) * 25 + packed_desig[11] - 'A';
+
+            if( packed_desig[11] > 'I')
+               n--;
+            if( n >= 62 * 62 * 62 * 62)
+               mangled_designation = true;
+            else
+               {
+               packed_desig[5] = '_';
+               packed_desig[6] = int_to_mutant_hex_char( number - 2000);
+               packed_desig[7] = packed_desig[8];    /* move half-month specifier */
+               encode_value_in_mutant_hex( packed_desig + 8, 4, n);
+               }
+            }
          while( isdigit( obj_name[i]))
             i++;
          if( comet_desig)
@@ -795,7 +976,7 @@ int create_mpc_packed_desig( char *packed_desig, const char *obj_name)
       {           /* permanently numbered asteroid */
       rval = 0;
       if( number < 620000)
-         sprintf( packed_desig, "%c%04d       ",
+         snprintf_err( packed_desig, PACKED_DESIG_LEN, "%c%04d       ",
                int_to_mutant_hex_char( number / 10000),
                number % 10000);
       else
@@ -818,7 +999,7 @@ int create_mpc_packed_desig( char *packed_desig, const char *obj_name)
       if( i == len || n_fragment_letters)
          {
          rval = 0;
-         sprintf( packed_desig, "%04d%c       ", number, comet_desig);
+         snprintf_err( packed_desig, PACKED_DESIG_LEN, "%04d%c       ", number, comet_desig);
          if( n_fragment_letters == 1)
             packed_desig[11] = obj_name[i + 1] + 'a' - 'A';
          if( n_fragment_letters == 2)

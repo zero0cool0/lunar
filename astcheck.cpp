@@ -35,6 +35,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 #include "comets.h"
 #include "afuncs.h"
 #include "mpc_func.h"
+#include "stringex.h"
 
 #define PI 3.1415926535897932384626433832795028841971693993751058209749445923
 #define LOG_10 2.3025850929940456840179914546843642076011014886287729760333279009675726
@@ -126,10 +127,10 @@ static FILE *get_file_from_path( const char *filename, const char *permits)
       {
       char buff[450];
 
-      strcpy( buff, data_path);
+      strlcpy_error( buff, data_path);
       if( buff[strlen( buff) - 1] != '/')
-         strcat( buff, "/");
-      strcat( buff, filename);
+         strlcat_error( buff, "/");
+      strlcat_error( buff, filename);
       fp = fopen( buff, permits);
       }
    if( !fp)
@@ -154,7 +155,7 @@ static FILE *get_sof_file( const char *filename)
          }
       record_length = (int)strlen( buff);
       assert( record_length < MAX_SOF_SIZE);
-      strcpy( sof_header, buff);
+      strlcpy_error( sof_header, buff);
       fseek( ifile, 0L, SEEK_END);
       filelen = ftell( ifile);
       if( filelen % record_length)
@@ -186,7 +187,7 @@ static double compute_asteroid_loc( const double *earth_loc,
             ELEMENTS *elem, const double jd, double *ra, double *dec)
 {
    double r1 = 0., dist, asteroid_loc[4];
-   int i;
+   int i, n_iterations = 0;
 
    do             /* light-time lag:  should converge _very_ fast       */
       {           /* it'll almost always require exactly two iterations */
@@ -195,6 +196,9 @@ static double compute_asteroid_loc( const double *earth_loc,
       for( i = 0; i < 3; i++)
          asteroid_loc[i] -= earth_loc[i];
       r1 = vector3_length( asteroid_loc);
+      if( n_iterations >= 15)
+         fprintf( stderr, "? e=%f, q=%f, jd=%f; diff %f/%f\n", elem->ecc, elem->q, jd, dist - r1, r1);
+      assert( n_iterations++ < 20);
       }
       while( fabs( dist - r1) > .001);
    ecliptic_to_equatorial( asteroid_loc);
@@ -305,17 +309,17 @@ file size.         */
 
 static AST_DATA *get_cached_day_data( const int ijd)
 {
+   AST_DATA *rval = NULL;
    char filename[20];
    FILE *ifile, *ofile;
    int32_t header[HEADER_SIZE];
    const int32_t magic_version_number = 1314159266;
-   AST_DATA *rval;
 
                   /* Create a filename in 'YYYYMMDD.chk' form: */
    full_ctime( filename, (double)ijd, FULL_CTIME_YMD | FULL_CTIME_NO_SPACES
                      | FULL_CTIME_DATE_ONLY | FULL_CTIME_MONTHS_AS_DIGITS
                      | FULL_CTIME_LEADING_ZEROES);
-   strcat( filename, ".chk");
+   strlcat_error( filename, ".chk");
    if( verbose > 2)
       printf( "Creating '%s'\n", filename);
    ifile = get_file_from_path( filename, "rb");
@@ -326,19 +330,18 @@ static AST_DATA *get_cached_day_data( const int ijd)
          printf( "Error reading header data in '%s'\n", filename);
          exit( -2);
          }
-      if( header[0] != magic_version_number
-                   || header[1] != sof_checksum || header[2] != n_asteroids)
-         fclose( ifile);
-      else   /* appears to be legitimate cached data */
+      if( header[0] == magic_version_number &&
+                      header[1] == sof_checksum && header[2] == n_asteroids)
+         {
+         fseek( ifile, 0L, SEEK_END);
+         if( ftell( ifile) == (n_asteroids + HEADER_SIZE) * 4L)
+            rval = (AST_DATA *)malloc( n_asteroids * sizeof( AST_DATA));
+         fseek( ifile, (long)sizeof( header), SEEK_SET);
+         }
+      if( rval)   /* appears to be legitimate cached data */
          {
          int n_read = 0, n_iterations = 0;
 
-         rval = (AST_DATA *)malloc( n_asteroids * sizeof( AST_DATA));
-         if( !rval)
-            {
-            printf( "Ran out of memory\n");
-            exit( -4);
-            }
          while( n_read != n_asteroids)
             {
             n_read += (int)fread( rval + n_read, sizeof( AST_DATA),
@@ -370,6 +373,7 @@ static AST_DATA *get_cached_day_data( const int ijd)
          fclose( ifile);
          return( rval);
          }
+      fclose( ifile);
       }
    header[0] = magic_version_number;
    header[1] = sof_checksum;
@@ -401,6 +405,10 @@ static int is_between( int bound1, int bound2, int x, int tolerance)
 
    bound1 -= x;
    bound2 -= x;
+   if( bound1 - bound2 > 32768)     /* bound1 is more than 180 degrees greater than bound2 */
+      bound1 -= 65536;
+   if( bound2 - bound1 > 32768)    /* bound2 is more than 180 degrees greater than bound1 */
+      bound2 -= 65536;
    while( bound1 + bound2 < -65536)
       {
       bound1 += 65536;
@@ -530,16 +538,16 @@ static char _dummy_filename[40];
 
 static void make_fake_file( const char **argv)
 {
-   char buff[181];
+   char buff[81];
    const double jd = get_time_from_string( 0., argv[2], 0, NULL);
    const double ra = atof( argv[3]);
    const double dec = atof( argv[4]);
    FILE *ofile = fopen( _dummy_filename, "wb");
 
-   strcpy( buff, "    dummy     C");
-   sprintf( buff + 15, "%16.8f %011.7f %+011.7f", jd, ra, dec);
-   strcat( buff, "                 Synth");
-   strcat( buff, argv[5]);          /* MPC code */
+   strlcpy_error( buff, "    dummy     C");
+   snprintf_append( buff, 56, "%16.8f %011.7f %+011.7f", jd, ra, dec);
+   strlcat_error( buff, "                 Synth");
+   strlcat_error( buff, argv[5]);          /* MPC code */
    fprintf( ofile, "%s\n", buff);
    fclose( ofile);
    assert( strlen( buff) == 80);
@@ -595,7 +603,7 @@ int main( const int argc, const char **argv)
    double jd, ra, dec;
    FILE *ifile;
    const char *sof_filename = "mpcorb.sof";
-   char buff[90];
+   char buff[400];
    char **ilines = NULL;
    int show_lov = 0;
    int i, n_ilines = 0, n, max_results = 100;
@@ -613,6 +621,7 @@ int main( const int argc, const char **argv)
    bool is_list_file = false;
    bool show_header = true;
    const char *mpcorb_extracts = "";
+   void *ades_context = init_ades2mpc( );
 
    if( argc < 2)
       {
@@ -620,7 +629,7 @@ int main( const int argc, const char **argv)
       return( -1);
       }
 #ifdef _WIN32
-   strcpy( _dummy_filename, "astcheck.tmp");
+   strlcpy_error( _dummy_filename, "astcheck.tmp");
 #else
    snprintf( _dummy_filename, sizeof( _dummy_filename), "astcheck%d.tmp",
                         (int)getpid( ));
@@ -722,7 +731,7 @@ int main( const int argc, const char **argv)
                /* Read astrometry lines and allocate memory for them : */
    ilines = (char **)malloc( (n_ilines + 1) * sizeof( char *));
    n_ilines = 0;
-   while( fgets( buff, sizeof( buff), ifile))
+   while( fgets_with_ades_xlation( buff, sizeof( buff), ades_context, ifile))
       if( !get_mpc_data( buff, &jd, &ra, &dec))
          {
          n_ilines++;
@@ -732,6 +741,7 @@ int main( const int argc, const char **argv)
          strcpy( ilines[n_ilines - 1], buff);
          }
    fclose( ifile);
+   free_ades2mpc_context( ades_context);
    if( is_list_file)
 #ifdef _WIN32                /* MS is different. */
       _unlink( _dummy_filename);
@@ -769,16 +779,44 @@ int main( const int argc, const char **argv)
             {
             int got_station_data = 0;
 
-            strcpy( curr_station, ilines[n] + 77);
+            strlcpy_error( curr_station, ilines[n] + 77);
             curr_station[3] = '\0';
             fseek( mpc_station_file, 0L, SEEK_SET);
             rho_sin_phi = rho_cos_phi = longitude = 0.;
             while( !got_station_data &&
                            fgets( tbuff, sizeof( tbuff), mpc_station_file))
                got_station_data = !memcmp( tbuff, curr_station, 3);
+            if( !got_station_data)
+               {
+               FILE *rovers_file = get_file_from_path( "rovers.txt", "rb");
+
+               if( !rovers_file)
+                  {
+                  fprintf( stderr, "Couldn't open 'rovers.txt'\n");
+                  return( -1);
+                  }
+               while( !got_station_data &&
+                           fgets( tbuff, sizeof( tbuff), rovers_file))
+                  got_station_data = !memcmp( tbuff, curr_station, 3);
+               fclose( rovers_file);
+               }
             if( got_station_data)
-               sscanf( tbuff + 3, "%lf%lf%lf",
-                                     &longitude, &rho_cos_phi, &rho_sin_phi);
+               {
+               mpc_code_t code_info;
+               const int err_code = get_mpc_code_info( &code_info, tbuff);
+
+               if( err_code < 0)
+                  {
+                  fprintf( stderr, "Code '%s' not found; error %d\n", tbuff, err_code);
+                  got_station_data = 0;
+                  }
+               else
+                  {
+                  longitude = code_info.lon * 180. / PI;
+                  rho_cos_phi= code_info.rho_cos_phi;
+                  rho_sin_phi= code_info.rho_sin_phi;
+                  }
+               }
             if( !got_station_data)
                printf( "FAILED to find MPC code %s\n", curr_station);
             longitude *= PI / 180.;

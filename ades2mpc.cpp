@@ -25,17 +25,15 @@ parsing in my software.
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
+#include <stdint.h>
+#include <math.h>
+#include "stringex.h"
 #include <stdio.h>
 #include <ctype.h>
 #include "watdefs.h"
 #include "date.h"
 #include "mpc_func.h"
-
-#if defined(_MSC_VER) && _MSC_VER < 1900
-                      /* For older MSVCs,  we have to supply our own  */
-                      /* snprintf().  See snprintf.cpp for details.  */
-int snprintf( char *string, const size_t max_len, const char *format, ...);
-#endif
+#include "afuncs.h"
 
 #define NOT_A_VALID_TIME -3.141e+17
 #define MAX_DEPTH 20
@@ -47,20 +45,24 @@ typedef struct
    char line[83];    /* allow possible CR, LF,  & null */
    char line2[83];
    char rms_ra[PIECE_SIZE], rms_dec[PIECE_SIZE], corr[PIECE_SIZE];
-   char rms_mag[PIECE_SIZE], rms_time[PIECE_SIZE], center[PIECE_SIZE];
-   char full_ra[PIECE_SIZE], full_dec[PIECE_SIZE];
-   char trk_sub[14], obs_id[PIECE_SIZE], trk_id[12];
+   char rms_mag[PIECE_SIZE], rms_time[PIECE_SIZE], unc_time[PIECE_SIZE];
+   char full_ra[PIECE_SIZE], full_dec[PIECE_SIZE], full_mag[9];
+   char notes[7], program_code[3];
+   char trk_sub[14], obs_id[PIECE_SIZE], trk_id[12], passband[4];
    long double full_t2k;
-   int id_set, getting_lines;
+   int id_set, getting_lines, spacecraft_center;
    int prev_line_passed_through;
    int prev_rval, n_psv_fields;
    int *psv_tags;
+   double spacecraft_vel[3];
+   bool ignore_artsat_desigs;
 } ades2mpc_t;
 
 void *init_ades2mpc( void)
 {
    ades2mpc_t *rval = (ades2mpc_t *)calloc( 1, sizeof( ades2mpc_t));
 
+   rval->full_t2k = NOT_A_VALID_TIME;
    return( rval);
 }
 
@@ -162,102 +164,109 @@ sorted so that a binary search can speed up tag matching slightly. */
 #define ADES_fRatio                       41
 #define ADES_filter                       42
 #define ADES_fitOrder                     43
-#define ADES_frq                          44
-#define ADES_fundingSource                45
-#define ADES_institution                  46
-#define ADES_line                         47
-#define ADES_localUse                     48
-#define ADES_logSNR                       49
-#define ADES_mag                          50
-#define ADES_measurers                    51
-#define ADES_mode                         52
-#define ADES_mpcCode                      53
-#define ADES_nStars                       54
-#define ADES_name                         55
-#define ADES_notes                        56
-#define ADES_nucMag                       57
-#define ADES_objectDetection              58
-#define ADES_obsBlock                     59
-#define ADES_obsCenter                    60
-#define ADES_obsContext                   61
-#define ADES_obsData                      62
-#define ADES_obsID                        63
-#define ADES_obsTime                      64
-#define ADES_observatory                  65
-#define ADES_observers                    66
-#define ADES_occultation                  67
-#define ADES_offset                       68
-#define ADES_optical                      69
-#define ADES_opticalResidual              70
-#define ADES_orbID                        71
-#define ADES_orbProd                      72
-#define ADES_pa                           73
-#define ADES_permID                       74
-#define ADES_photAp                       75
-#define ADES_photCat                      76
-#define ADES_photMod                      77
-#define ADES_photProd                     78
-#define ADES_photometry                   79
-#define ADES_pixelScale                   80
-#define ADES_pos1                         81
-#define ADES_pos2                         82
-#define ADES_pos3                         83
-#define ADES_posCov11                     84
-#define ADES_posCov12                     85
-#define ADES_posCov13                     86
-#define ADES_posCov22                     87
-#define ADES_posCov23                     88
-#define ADES_posCov33                     89
-#define ADES_precDec                      90
-#define ADES_precRA                       91
-#define ADES_precTime                     92
-#define ADES_prog                         93
-#define ADES_provID                       94
-#define ADES_ra                           95
-#define ADES_raStar                       96
-#define ADES_radar                        97
-#define ADES_radarResidual                98
-#define ADES_rcv                          99
-#define ADES_ref                         100
-#define ADES_remarks                     101
-#define ADES_resDec                      102
-#define ADES_resDelay                    103
-#define ADES_resDoppler                  104
-#define ADES_resMag                      105
-#define ADES_resRA                       106
-#define ADES_rmsCorr                     107
-#define ADES_rmsDec                      108
-#define ADES_rmsDelay                    109
-#define ADES_rmsDist                     110
-#define ADES_rmsDoppler                  111
-#define ADES_rmsFit                      112
-#define ADES_rmsMag                      113
-#define ADES_rmsPA                       114
-#define ADES_rmsRA                       115
-#define ADES_rmsTime                     116
-#define ADES_seeing                      117
-#define ADES_selAst                      118
-#define ADES_selDelay                    119
-#define ADES_selDoppler                  120
-#define ADES_selPhot                     121
-#define ADES_sigCorr                     122
-#define ADES_sigDec                      123
-#define ADES_sigDelay                    124
-#define ADES_sigDoppler                  125
-#define ADES_sigMag                      126
-#define ADES_sigRA                       127
-#define ADES_sigTime                     128
-#define ADES_software                    129
-#define ADES_stn                         130
-#define ADES_subFmt                      131
-#define ADES_subFrm                      132
-#define ADES_submitter                   133
-#define ADES_sys                         134
-#define ADES_telescope                   135
-#define ADES_trkID                       136
-#define ADES_trkSub                      137
-#define ADES_trx                         138
-#define ADES_uncTime                     139
+#define ADES_fltr                         44
+#define ADES_frq                          45
+#define ADES_fundingSource                46
+#define ADES_institution                  47
+#define ADES_line                         48
+#define ADES_localUse                     49
+#define ADES_logSNR                       50
+#define ADES_mag                          51
+#define ADES_measurers                    52
+#define ADES_mode                         53
+#define ADES_mpcCode                      54
+#define ADES_nStars                       55
+#define ADES_name                         56
+#define ADES_notes                        57
+#define ADES_nucMag                       58
+#define ADES_objectDetection              59
+#define ADES_obsBlock                     60
+#define ADES_obsCenter                    61
+#define ADES_obsContext                   62
+#define ADES_obsData                      63
+#define ADES_obsID                        64
+#define ADES_obsSubID                     65
+#define ADES_obsTime                      66
+#define ADES_observatory                  67
+#define ADES_observers                    68
+#define ADES_occultation                  69
+#define ADES_offset                       70
+#define ADES_optical                      71
+#define ADES_opticalResidual              72
+#define ADES_orbID                        73
+#define ADES_orbProd                      74
+#define ADES_pa                           75
+#define ADES_permID                       76
+#define ADES_photAp                       77
+#define ADES_photCat                      78
+#define ADES_photMod                      79
+#define ADES_photProd                     80
+#define ADES_photometry                   81
+#define ADES_pixelScale                   82
+#define ADES_pos1                         83
+#define ADES_pos2                         84
+#define ADES_pos3                         85
+#define ADES_posCov11                     86
+#define ADES_posCov12                     87
+#define ADES_posCov13                     88
+#define ADES_posCov22                     89
+#define ADES_posCov23                     90
+#define ADES_posCov33                     91
+#define ADES_precDec                      92
+#define ADES_precRA                       93
+#define ADES_precTime                     94
+#define ADES_prog                         95
+#define ADES_provID                       96
+#define ADES_ra                           97
+#define ADES_raStar                       98
+#define ADES_radar                        99
+#define ADES_radarResidual               100
+#define ADES_rcv                         101
+#define ADES_ref                         102
+#define ADES_remarks                     103
+#define ADES_resDec                      104
+#define ADES_resDelay                    105
+#define ADES_resDoppler                  106
+#define ADES_resMag                      107
+#define ADES_resRA                       108
+#define ADES_rmsCorr                     109
+#define ADES_rmsDec                      110
+#define ADES_rmsDelay                    111
+#define ADES_rmsDist                     112
+#define ADES_rmsDoppler                  113
+#define ADES_rmsFit                      114
+#define ADES_rmsMag                      115
+#define ADES_rmsPA                       116
+#define ADES_rmsRA                       117
+#define ADES_rmsTime                     118
+#define ADES_seeing                      119
+#define ADES_selAst                      120
+#define ADES_selDelay                    121
+#define ADES_selDoppler                  122
+#define ADES_selPhot                     123
+#define ADES_shapeOcc                    124
+#define ADES_sigCorr                     125
+#define ADES_sigDec                      126
+#define ADES_sigDelay                    127
+#define ADES_sigDoppler                  128
+#define ADES_sigMag                      129
+#define ADES_sigRA                       130
+#define ADES_sigTime                     131
+#define ADES_software                    132
+#define ADES_stn                         133
+#define ADES_subFmt                      134
+#define ADES_subFrm                      135
+#define ADES_submitter                   136
+#define ADES_sys                         137
+#define ADES_telescope                   138
+#define ADES_trkID                       139
+#define ADES_trkMPC                      140
+#define ADES_trkSub                      141
+#define ADES_trx                         142
+#define ADES_uncTime                     143
+#define ADES_vel1                        144
+#define ADES_vel2                        145
+#define ADES_vel3                        146
 
 /* See 'adestags.c' for code that created following array
 and the above #defines. */
@@ -274,25 +283,27 @@ static int find_tag( const char *buff, size_t len)
        "com", "comment", "ctr", "dec", "decStar", "delay",
        "deltaDec", "deltaRA", "deprecated", "design", "detector",
        "disc", "dist", "doppler", "exp", "fRatio", "filter",
-       "fitOrder", "frq", "fundingSource", "institution", "line",
-       "localUse", "logSNR", "mag", "measurers", "mode",
+       "fitOrder", "fltr", "frq", "fundingSource", "institution",
+       "line", "localUse", "logSNR", "mag", "measurers", "mode",
        "mpcCode", "nStars", "name", "notes", "nucMag",
        "objectDetection", "obsBlock", "obsCenter", "obsContext",
-       "obsData", "obsID", "obsTime", "observatory", "observers",
-       "occultation", "offset", "optical", "opticalResidual",
-       "orbID", "orbProd", "pa", "permID", "photAp", "photCat",
-       "photMod", "photProd", "photometry", "pixelScale", "pos1",
-       "pos2", "pos3", "posCov11", "posCov12", "posCov13",
-       "posCov22", "posCov23", "posCov33", "precDec", "precRA",
-       "precTime", "prog", "provID", "ra", "raStar", "radar",
-       "radarResidual", "rcv", "ref", "remarks", "resDec",
-       "resDelay", "resDoppler", "resMag", "resRA", "rmsCorr",
-       "rmsDec", "rmsDelay", "rmsDist", "rmsDoppler", "rmsFit",
-       "rmsMag", "rmsPA", "rmsRA", "rmsTime", "seeing", "selAst",
-       "selDelay", "selDoppler", "selPhot", "sigCorr", "sigDec",
-       "sigDelay", "sigDoppler", "sigMag", "sigRA", "sigTime",
-       "software", "stn", "subFmt", "subFrm", "submitter", "sys",
-       "telescope", "trkID", "trkSub", "trx", "uncTime",
+       "obsData", "obsID", "obsSubID", "obsTime", "observatory",
+       "observers", "occultation", "offset", "optical",
+       "opticalResidual", "orbID", "orbProd", "pa", "permID",
+       "photAp", "photCat", "photMod", "photProd", "photometry",
+       "pixelScale", "pos1", "pos2", "pos3", "posCov11",
+       "posCov12", "posCov13", "posCov22", "posCov23", "posCov33",
+       "precDec", "precRA", "precTime", "prog", "provID", "ra",
+       "raStar", "radar", "radarResidual", "rcv", "ref",
+       "remarks", "resDec", "resDelay", "resDoppler", "resMag",
+       "resRA", "rmsCorr", "rmsDec", "rmsDelay", "rmsDist",
+       "rmsDoppler", "rmsFit", "rmsMag", "rmsPA", "rmsRA",
+       "rmsTime", "seeing", "selAst", "selDelay", "selDoppler",
+       "selPhot", "shapeOcc", "sigCorr", "sigDec", "sigDelay",
+       "sigDoppler", "sigMag", "sigRA", "sigTime", "software",
+       "stn", "subFmt", "subFrm", "submitter", "sys", "telescope",
+       "trkID", "trkMPC", "trkSub", "trx", "uncTime", "vel1",
+       "vel2", "vel3",
    NULL };
 
    int i, rval = -1;
@@ -316,6 +327,7 @@ static int find_tag( const char *buff, size_t len)
 static inline void pack_mpc_reference( char *packed, const char *ref)
 {
    const size_t len = strlen( ref);
+   char temp_packed[6];
 
    if( len >= 12 && len <= 14 && !memcmp( ref, "MPEC ", 5) && ref[9] == '-')
       {
@@ -324,6 +336,44 @@ static inline void pack_mpc_reference( char *packed, const char *ref)
       ref += 11;
       packed[0] = packed[1] = '0';
       memcpy( packed + 14 - len, ref, len - 11);
+      }
+   else if( !memcmp( ref, "MPS ", 4))
+      {
+      unsigned mps_number = atoi( ref + 4);
+
+      if( mps_number < 260000)
+         {
+         snprintf_err( temp_packed, sizeof( temp_packed),
+                                "%c%04u", 'a' + mps_number / 10000,
+                                mps_number % 10000);
+         memcpy( packed, temp_packed, 5);
+         }
+      else
+         {
+         *packed = '~';
+         encode_value_in_mutant_hex( packed + 1, 4, mps_number - 260000);
+         }
+      }
+   else if( !memcmp( ref, "MPC ", 4))
+      {
+      unsigned mpc_number = atoi( ref + 4);
+
+      if( mpc_number < 110000)
+         {
+         snprintf_err( temp_packed, sizeof( temp_packed),
+               (mpc_number < 100000 ? "%05u" : "@%04u"), mpc_number % 100000);
+         memcpy( packed, temp_packed, 5);
+         }
+      else
+         {
+         *packed = '#';
+         encode_value_in_mutant_hex( packed + 1, 4, mpc_number - 110000);
+         }
+      }
+   else if( *ref == '!')
+      {
+      memcpy( packed, "     ", 5);
+      memcpy( packed, ref, len > 5 ? 5 : len);
       }
 }
 
@@ -334,7 +384,9 @@ static inline size_t move_fits_time( char *optr, const char *iptr)
    if( iptr[4] == '-' && iptr[7] == '-' && iptr[10] == 'T'
                && iptr[13] == ':')
       {
-      *optr++ = (char)((iptr[0] * 10 + iptr[1] - '0' * 11) + 'A' - 10);
+      const int century = iptr[0] * 10 + iptr[1] - '0' * 11;
+
+      *optr++ = int_to_mutant_hex_char( century);
       iptr += 2;
       while( *iptr && *iptr != 'Z')
          {
@@ -361,7 +413,7 @@ static inline int place_value( char *optr, const char *iptr, const size_t ilen,
       {
       char tbuff[13];
 
-      snprintf( tbuff, sizeof( tbuff), (leading_places == 2 ? "%11.8f " : "%12.8f"),
+      snprintf_err( tbuff, sizeof( tbuff), (leading_places == 2 ? "%11.8f " : "%12.8f"),
                         atof( iptr));
       memcpy( optr, tbuff, 12);
       return (1);
@@ -382,79 +434,140 @@ static const char *skip_whitespace( const char *tptr)
    return( tptr);
 }
 
-static int get_a_line( char *obuff, ades2mpc_t *cptr)
+/* A spacecraft offset in ADES is an optionally signed number fitting
+in 13 characters.  The old punch-card format puts each coordinate into a
+sign plus ten bytes.  If an offset given in ADES won't fit into the
+punch-card constraint,  the following function converts the digital
+part into a nine base-62-digits.  The lead digit then indicates the
+location of the decimal point.  See unpack_oversized_spacecraft_offset()
+in mpc_fmt.c for the reverse function. */
+
+static void pack_oversized_spacecraft_offset( char *obuff, const char *ibuff)
+{
+   int64_t oval = 0;
+   int i;
+
+   *obuff = *ibuff;        /* + or - sign */
+   obuff[1] = 'A';         /* assuming no decimal point */
+   for( i = 1; ibuff[i]; i++)
+      if( ibuff[i] >= '0' && ibuff[i] <= '9')
+         oval = oval * 10 + ibuff[i] - '0';
+      else if( ibuff[i] == '.')
+         obuff[1] = (char)( 'A' + i);
+   for( i = 10; i > 1; i--)
+      {
+      obuff[i] = int_to_mutant_hex_char( (int)( oval % 62));
+      oval /= 62;
+      }
+   obuff[11] = ' ';
+}
+
+static int get_a_line( char *obuff, const size_t obuff_size, ades2mpc_t *cptr)
 {
    if (cptr->rms_ra[0])
       {
-      sprintf( obuff, "COM Sigmas %s", cptr->rms_ra);
+      snprintf_err( obuff, obuff_size, "COM Sigmas %s", cptr->rms_ra);
       if( strcmp( cptr->rms_ra, cptr->rms_dec))
          {
-         sprintf( obuff + strlen( obuff), "x%s", cptr->rms_dec);
+         snprintf_append( obuff, obuff_size, "x%s", cptr->rms_dec);
          if( atof( cptr->corr))
-            sprintf( obuff + strlen( obuff), ",%s", cptr->corr);
+            snprintf_append( obuff, obuff_size, ",%s", cptr->corr);
          }
       if( cptr->rms_mag[0])
          {
-         strcat( obuff, " m:");
-         strcat( obuff, cptr->rms_mag);
+         strlcat_err( obuff, " m:", obuff_size);
+         strlcat_err( obuff, cptr->rms_mag, obuff_size);
          cptr->rms_mag[0] = '\0';
          }
       if( cptr->rms_time[0])
          {
-         strcat( obuff, " t:");
-         strcat( obuff, cptr->rms_time);
+         strlcat_err( obuff, " t:", obuff_size);
+         strlcat_err( obuff, cptr->rms_time, obuff_size);
          cptr->rms_time[0] = '\0';
          }
+      if( cptr->unc_time[0])
+         {
+         strlcat_err( obuff, " u:", obuff_size);
+         strlcat_err( obuff, cptr->unc_time, obuff_size);
+         cptr->unc_time[0] = '\0';
+         }
       cptr->rms_ra[0] = '\0';
-      strcat( obuff, "\n");
+      strlcat_err( obuff, "\n", obuff_size);
       }
    else if( cptr->trk_sub[0] || cptr->obs_id[0] || cptr->trk_id[0])
       {
-      strcpy( obuff, "COM IDs");
+      strlcpy_err( obuff, "COM IDs", obuff_size);
       if( cptr->trk_sub[0])
-         sprintf( obuff + strlen( obuff), " trkSub:%s", cptr->trk_sub);
+         snprintf_append( obuff, obuff_size, " trkSub:%s", cptr->trk_sub);
       if( cptr->obs_id[0])
-         sprintf( obuff + strlen( obuff), " obsID:%s", cptr->obs_id);
+         snprintf_append( obuff, obuff_size, " obsID:%s", cptr->obs_id);
       if( cptr->trk_id[0])
-         sprintf( obuff + strlen( obuff), " trkID:%s", cptr->trk_id);
+         snprintf_append( obuff, obuff_size, " trkID:%s", cptr->trk_id);
       cptr->trk_sub[0] = cptr->obs_id[0] = cptr->trk_id[0] = '\0';
-      strcat( obuff, "\n");
+      strlcat_err( obuff, "\n", obuff_size);
       }
    else if( cptr->full_ra[0] || cptr->full_dec[0] || cptr->full_t2k != NOT_A_VALID_TIME)
       {
-      sprintf( obuff, "COM RA/dec %s %s",
+      snprintf_err( obuff, obuff_size, "COM RA/dec %s %s",
                (cptr->full_ra[0] ? cptr->full_ra : "-"),
                (cptr->full_dec[0] ? cptr->full_dec : "-"));
       if( cptr->full_t2k != NOT_A_VALID_TIME)
-         sprintf( obuff + strlen( obuff), " %.15f", (double)cptr->full_t2k);
-      strcat( obuff, "\n");
+         snprintf_append( obuff, obuff_size, " %.15f", (double)cptr->full_t2k);
+      strlcat_err( obuff, "\n", obuff_size);
       cptr->full_ra[0] = cptr->full_dec[0] = '\0';
       cptr->full_t2k = NOT_A_VALID_TIME;
       }
    else if( cptr->full_dec[0])
       {
-      sprintf( obuff, "COM RA/dec - %s\n", cptr->full_dec);
+      snprintf_err( obuff, obuff_size, "COM RA/dec - %s\n", cptr->full_dec);
       cptr->full_dec[0] = '\0';
       }
-   else if( cptr->center[0])
+   else if( cptr->full_mag[0])
       {
-      sprintf( obuff, "COM Offset center %s", cptr->center);
-      cptr->center[0] = '\0';
+      snprintf_err( obuff, obuff_size, "COM full mag %s\n", cptr->full_mag);
+      cptr->full_mag[0] = '\0';
+      }
+   else if( cptr->passband[1] || cptr->notes[0] > ' ' || cptr->program_code[0] >= ' ')
+      {
+      snprintf_err( obuff, obuff_size, "COM ADES tags");
+      if( cptr->passband[1])
+         snprintf_append( obuff, obuff_size, " band:%s", cptr->passband);
+      if( cptr->notes[0] >= ' ')
+         snprintf_append( obuff, obuff_size, " notes:%s", cptr->notes);
+      if( cptr->program_code[0] >= ' ')
+         snprintf_append( obuff, obuff_size, " progcode:%s", cptr->program_code);
+      cptr->passband[1] = cptr->notes[0] = cptr->program_code[0] = '\0';
+      }
+   else if( cptr->spacecraft_vel[0] || cptr->spacecraft_vel[1] || cptr->spacecraft_vel[2])
+      {
+      double multiplier = 1.;
+
+      if( cptr->line2[32] == '2')   /* units are AU and days;  */
+         multiplier = AU_IN_KM / seconds_per_day;
+      snprintf_err( obuff, obuff_size, "COM vel (km/s) %.14s  %+13.7f%13.7f%13.7f %s",
+                     cptr->line + 15,
+                     cptr->spacecraft_vel[0] * multiplier,
+                     cptr->spacecraft_vel[1] * multiplier,
+                     cptr->spacecraft_vel[2] * multiplier,
+                     cptr->line + 77);
+      memset( cptr->spacecraft_vel, 0, sizeof( cptr->spacecraft_vel));
       }
    else if( cptr->line[0])
       {
-      strcpy( obuff, cptr->line);
+      strlcpy( obuff, cptr->line, obuff_size);
       if( cptr->line2[0])     /* yes,  we've a valid line 2 */
          {
          memcpy( cptr->line2, cptr->line, 12);
          memcpy( cptr->line2 + 15, cptr->line + 15, 17);
+         if( cptr->spacecraft_center != 399)
+            snprintf_err( cptr->line2 + 69, 9, "%8d", cptr->spacecraft_center);
          memcpy( cptr->line2 + 77, cptr->line + 77, 3);
          }
       cptr->line[0] = '\0';
       }
    else if( cptr->line2[0])
       {
-      strcpy( obuff, cptr->line2);
+      strlcpy_err( obuff, cptr->line2, obuff_size);
       cptr->line2[0] = '\0';
       }
    else                         /* got all the lines we'll get */
@@ -471,6 +584,7 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
 {
    int rval = 0;
    char name[40];
+   const size_t obuff_size = 221;
 
    assert( obuff);
    *obuff = '\0';
@@ -482,7 +596,7 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
    switch( itag)
       {
       case ADES_mpcCode:
-         sprintf( obuff, "COD %s\n", name);
+         snprintf_err( obuff, obuff_size, "COD %s\n", name);
          rval = 1;
          break;
       case ADES_name:
@@ -515,9 +629,9 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
                   break;
                }
          if( format)
-            sprintf( obuff, format, (int)len, tptr);
+            snprintf_err( obuff, obuff_size, format, (int)len, tptr);
          else
-            strcpy( obuff, "COM Mangled name data\n");
+            strlcpy_err( obuff, "COM Mangled name data\n", obuff_size);
          rval = 1;
          }
          break;
@@ -525,28 +639,48 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
          memcpy( cptr->line + 77, tptr, 3);
          break;
       case ADES_obsTime:
-         if( move_fits_time( cptr->line + 15, tptr) > 17)
+         {
+         const bool too_far_in_future = (atoi( tptr) > 2099);
+
+         if( move_fits_time( cptr->line + 15, tptr) > 17 || too_far_in_future)
             {
             char *zptr = strchr( name, 'Z');
 
             if( zptr)
                *zptr = '\0';
             cptr->full_t2k = get_time_from_stringl( 0., name, 0, NULL);
+            if( too_far_in_future)
+               cptr->line[15] = 'K';
             }
+         }
          break;
       case ADES_band:
-         cptr->line[70] = *tptr;
+         if( (*tptr == 'P' || *tptr == 'S')
+                           && strchr( "grizwy", tptr[1]) && tptr[1])
+            cptr->line[70] = tptr[1];     /* PanSTARRS or Sloan band */
+         else if( *tptr == 'A' && (tptr[1] == 'o' || tptr[1] == 'c'))
+            cptr->line[70] = tptr[1];   /* ATLAS Ao & Ac bands */
+         else if( *tptr == 'G' && (tptr[1] == 'b' || tptr[1] == 'r'))
+            cptr->line[70] = tptr[1];   /* Gaia b or r band */
+         else
+            cptr->line[70] = *tptr;
+         assert( len > 0 && len < 4);    /* three-byte passcodes are allowed */
+         strcpy( cptr->passband, name);
          break;
       case ADES_mode:
          if( len == 3)
-            {
-            const char *modes = "CCCD VVID PPHO eENC pPMT MMIC TMER ";
+            {     /* https://www.minorplanetcenter.net/iau/info/ADESFieldValues.html */
+            const char *modes =  "CCCD BCMO nVID PPHO eENC pPMT"
+                                " MMIC TMER CTDI EOCC ?UNK ";
             int i;
 
             for( i = 0; modes[i]; i += 5)
                if( !memcmp( modes + i + 1, tptr, 3))
                   cptr->line[14] = modes[i];
             }
+         break;
+      case ADES_deprecated:
+         cptr->line[14] = 'X';
          break;
       case ADES_disc:
          if( *tptr == '*')
@@ -563,6 +697,8 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
 
          if( idx >=0 && idx <= 34)
             cptr->line[13] = programs[idx];
+         assert( len < sizeof( cptr->program_code));
+         strlcpy_err( cptr->program_code, name, sizeof( cptr->program_code));
          }
          break;
       case ADES_sys:
@@ -579,19 +715,24 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
             }
          else if( !strcmp( name, "ITRF") || !strcmp( name, "IAU"))
             {
-            strcpy( obuff, "Can't handle <sys> ITRF or IAU yet\n");
+            strlcpy_err( obuff, "Can't handle <sys> ITRF or IAU yet\n", obuff_size);
             assert( 0);
             }
          else
             {
-            strcpy( obuff, "Bad <sys> tag\n");
+            strlcpy_err( obuff, "Bad <sys> tag\n", obuff_size);
             assert( 0);
             }
          cptr->line[14]  = toupper( cptr->line2[14]);
          break;
       case ADES_ctr:
-         assert( len < sizeof( cptr->center));
-         strcpy( cptr->center, name);
+         cptr->spacecraft_center = atoi( name);
+         break;
+      case ADES_vel1:
+      case ADES_vel2:
+      case ADES_vel3:
+         assert( cptr->line[14] == 'S');
+         cptr->spacecraft_vel[itag - ADES_vel1] = atof( name);
          break;
       case ADES_pos1:
       case ADES_pos2:
@@ -599,14 +740,23 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
          assert( cptr->line[14] == 'S' || cptr->line[14] == 'V');
          if( cptr->line[14] == 'S')    /* satellite offset */
             {
-            int dec_loc = 40 + (itag - ADES_pos1) * 12;
-            int nlen = (int)len;
+            const int sign_loc = 34 + (itag - ADES_pos1) * 12;
+            int nlen = (int)len, decimal_loc = 0;
             char *tptr2;
 
-                     /* cvt scientific notation,  if any : */
+            if( cptr->line2[32] == '2')
+               decimal_loc = sign_loc + 6;
+            else if( cptr->line2[32] == '1')
+               decimal_loc = sign_loc + 2;
+            else
+               {
+               strlcpy_err( obuff, "Bad posn data\n", obuff_size);
+               rval = 1;
+               }
+                     /* cvt scientific notation,  if any (NOT VALID ADES) : */
             if( strchr( name, 'e') || strchr( name, 'E'))
                {
-               snprintf( name, sizeof( name), "%.13f", atof( name));
+               snprintf_err( name, sizeof( name), "%.13f", atof( name));
                nlen = 12;
                }
             if( *name != '+' && *name != '-')   /* no sign provided; */
@@ -615,43 +765,50 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
                memmove( name + 1, name, nlen);
                *name = '+';
                }
-            cptr->line2[dec_loc - 6] = *name;
+            cptr->line2[sign_loc] = *name;
             tptr2 = strchr( name, '.');
             assert( tptr2);
-            dec_loc -= (int)(tptr2 - name);
-            if( cptr->line2[32] == '2')
-               dec_loc -= 4;
-            else if( cptr->line2[32] != '1')
+            if( cptr->line2[32] == '1')
                {
-               strcpy( obuff, "Bad posn data\n");
+               decimal_loc = sign_loc + 6;
+               if( tptr2 - name >= 7)     /* 100000 to one billion km */
+                  decimal_loc += (int)( tptr2 - name) - 6;
+               assert( tptr2 - name < 11);
+               }
+            else if( cptr->line2[32] == '2')
+               {
+               decimal_loc = sign_loc + 2;
+               if( tptr2 - name == 3)     /* beyond 10 AU */
+                  decimal_loc++;
+               assert( tptr2 - name < 4);    /* anything beyond 100 AU */
+               }                             /*  is probably an error */
+            else
+               {
+               strlcpy_err( obuff, "Bad posn data\n", obuff_size);
                rval = 1;
                }
-            memcpy( &cptr->line2[dec_loc + 1], name + 1,
-                                           (nlen > 12 ? 11 : nlen - 1));
+            if( nlen > 11)
+               pack_oversized_spacecraft_offset( &cptr->line2[sign_loc], name);
+            else if( decimal_loc)
+               {
+               decimal_loc -= (int)(tptr2 - name);
+               memcpy( &cptr->line2[decimal_loc + 1], name + 1, nlen - 1);
+               }
             }
          else               /* roving observer */
             {
-            char *tptr2 = strchr( name, '.');
+            const double ival = atof( name);
             size_t loc;
 
             if( itag == ADES_pos1)     /* East longitude */
-               loc = 37 - (tptr2 - name);
-            else if( itag == ADES_pos2)
-               {           /* lat _must_ be signed,  w/sign in column 46 */
-               if( *name == '-' || *name == '+')
-                  {
-                  cptr->line2[45] = *name;
-                  memmove( name, name + 1, len);
-                  tptr2--;
-                  len--;
-                  }
-               else
-                  cptr->line2[45] = '+';
-               loc = 48 - (tptr2 - name);
-               }
+               snprintf_err( cptr->line2 + 34, 10, "%9.5f",
+                              fmod( ival + 360., 360.));
+            else if( itag == ADES_pos2)      /* latitude must be signed */
+               snprintf_err( cptr->line2 + 45, 10, "%+9.5f", ival);
             else           /* altitude */
-               loc = 61 - len;
-            memcpy( cptr->line2 + loc, name, len);
+               snprintf_err( cptr->line2 + 56, 6, "%5d", (int)ival);
+            loc = strlen( cptr->line2);
+            cptr->line2[loc] = ' ';
             }
          break;
       case ADES_ra:
@@ -684,29 +841,36 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
       case ADES_astCat:
          assert( len < sizeof( name));
          cptr->line[71] = net_name_to_byte_code( name);
+         assert( cptr->line[71]);
          break;
       case ADES_rmsRA:
          assert( len < sizeof( cptr->rms_ra));
-         strcpy( cptr->rms_ra, name);
+         strlcpy_err( cptr->rms_ra, name, sizeof( cptr->rms_ra));
          break;
       case ADES_notes:
+         assert( len < sizeof( cptr->notes));
+         strlcpy_err( cptr->notes, name, sizeof( cptr->notes));
          cptr->line[13] = name[0];
          break;
       case ADES_rmsDec:
          assert( len < sizeof( cptr->rms_dec));
-         strcpy( cptr->rms_dec, name);
+         strlcpy_err( cptr->rms_dec, name, sizeof( cptr->rms_dec));
          break;
       case ADES_rmsCorr:
          assert( len < sizeof( cptr->corr));
-         strcpy( cptr->corr, name);
+         strlcpy_err( cptr->corr, name, sizeof( cptr->corr));
          break;
       case ADES_rmsTime:
          assert( len < sizeof( cptr->rms_time));
-         strcpy( cptr->rms_time, name);
+         strlcpy_err( cptr->rms_time, name, sizeof( cptr->rms_time));
+         break;
+      case ADES_uncTime:
+         assert( len < sizeof( cptr->unc_time));
+         strlcpy_err( cptr->unc_time, name, sizeof( cptr->unc_time));
          break;
       case ADES_rmsMag:
          assert( len < sizeof( cptr->rms_mag));
-         strcpy( cptr->rms_mag, name);
+         strlcpy_err( cptr->rms_mag, name, sizeof( cptr->rms_mag));
          break;
       case ADES_provID:
          if( cptr->id_set == ADES_permID)
@@ -733,7 +897,7 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
          break;
       case ADES_artSat:
          assert( len < 13);
-         if( !cptr->id_set)
+         if( !cptr->id_set && !cptr->ignore_artsat_desigs)
             {
             cptr->id_set = ADES_artSat;
             memcpy( cptr->line, tptr, len);
@@ -741,7 +905,7 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
          break;
       case ADES_trkSub:
          assert( len < 13);
-         strcpy( cptr->trk_sub, name);
+         strlcpy_err( cptr->trk_sub, name, sizeof( cptr->trk_sub));
          if( !cptr->id_set)
             {
             cptr->id_set = ADES_trkSub;
@@ -754,18 +918,21 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
          break;
       case ADES_trkID:
          assert( len < sizeof( cptr->trk_id));
-         strcpy( cptr->trk_id, name);
+         strlcpy_err( cptr->trk_id, name, sizeof( cptr->trk_id));
          break;
       case ADES_obsID:
          assert( len < sizeof( cptr->obs_id));
-         strcpy( cptr->obs_id, name);
+         strlcpy_err( cptr->obs_id, name, sizeof( cptr->obs_id));
          break;
       case ADES_mag:
          memcpy( cptr->line + 65, tptr, (len < 5) ? len : 5);
+         if( len > 5)
+            strlcpy_err( cptr->full_mag, name, sizeof( cptr->full_mag));
          break;
+      case ADES_trkMPC:    /* trkSub if it's deprecated;  */
+         break;            /* currently ignored           */
       default:
-         strcpy( obuff, "COM Unhandled ");
-         strcat( obuff, tptr);
+         snprintf_err( obuff, obuff_size, "COM Unhandled ADES tag %d", itag);
          break;
       }
    return( rval);
@@ -790,11 +957,12 @@ static int process_psv_tag( ades2mpc_t *cptr, char *obuff, const int itag,
 static void setup_observation( ades2mpc_t *cptr)
 {
    memset( cptr->line, ' ', 80);
-   strcpy( cptr->line + 80, "\n");
+   strlcpy_err( cptr->line + 80, "\n", 2);
    memset( cptr->line2, ' ', 80);
-   strcpy( cptr->line2 + 80, "\n");
+   strlcpy_err( cptr->line2 + 80, "\n", 2);
    cptr->line2[0] = '\0';
    cptr->id_set = 0;
+   cptr->spacecraft_center = 399;      /* default to geocentric */
    cptr->full_t2k = NOT_A_VALID_TIME;
 }
 
@@ -829,7 +997,7 @@ static int check_for_tholen_sigmas( ades2mpc_t *cptr, char *obuff, const char *i
          memcpy( cptr->rms_ra, ibuff + 81, 5);
          memcpy( cptr->rms_dec, ibuff + 87, 5);
          cptr->rms_ra[5] = cptr->rms_dec[5] = '\0';
-         strcpy( cptr->line, obuff);
+         strlcpy_err( cptr->line, obuff, sizeof( cptr->line));
          obuff[12] = '\0';
          if( !create_mpc_packed_desig( packed_desig, obuff))
             memcpy( cptr->line, packed_desig, 12);
@@ -907,6 +1075,8 @@ static int check_for_psv_header( ades2mpc_t *cptr, const char *buff)
       while( tptr[i] != '|' && tptr[i] > ' ')
          i++;
       cptr->psv_tags[n_psv_tags] = find_tag( tptr, i);
+/*    if( cptr->psv_tags[n_psv_tags] <= 0)
+         fprintf( stderr, "Tag %d '%s' failed in '%s'\n", n_psv_tags, tptr, buff); */
       assert( cptr->psv_tags[n_psv_tags] > 0);
       n_psv_tags++;
       assert( tptr);
@@ -958,6 +1128,7 @@ int xlate_ades2mpc( void *context, char *obuff, const char *buff)
    const char *tptr;
    ades2mpc_t *cptr = (ades2mpc_t *)context;
    char temp_obuff[300], *orig_obuff = NULL;
+   const size_t obuff_size = 221;
 
    if( cptr->prev_line_passed_through)
       {
@@ -965,7 +1136,7 @@ int xlate_ades2mpc( void *context, char *obuff, const char *buff)
       return( 0);
       }
    if( cptr->getting_lines)
-      return( get_a_line( obuff, cptr));
+      return( get_a_line( obuff, obuff_size, cptr));
    if( !cptr->depth && strstr( buff, "<optical>"))
       cptr->depth = 1;
    if( check_for_psv_header( cptr, buff))
@@ -994,7 +1165,7 @@ int xlate_ades2mpc( void *context, char *obuff, const char *buff)
          if( rval == 1)
             {
             if( obuff == buff)
-               strcpy( obuff, temp_obuff);
+               strlcpy_err( obuff, temp_obuff, obuff_size);
             }
          else        /* 'container' tag;  affects internal state,  but */
             rval = 0;    /* nothing is output */
@@ -1007,12 +1178,12 @@ int xlate_ades2mpc( void *context, char *obuff, const char *buff)
    if( !rval && !cptr->depth && !strstr( buff, "<ades version"))
       {
       if( obuff != buff)
-         strcpy( obuff, buff);
+         strlcpy_err( obuff, buff, obuff_size);
       cptr->prev_line_passed_through = 1;
       return( 1);
       }
    if( cptr->getting_lines)
-      return( get_a_line( obuff, cptr));
+      return( get_a_line( obuff, obuff_size, cptr));
    if( obuff == buff)            /* translating in place */
       {
       orig_obuff = obuff;
@@ -1070,12 +1241,14 @@ int xlate_ades2mpc( void *context, char *obuff, const char *buff)
          rval = process_ades_tag( obuff, cptr, itag, tptr, len);
          tptr += len;
          }
+      else
+         return rval;
       tptr = skip_whitespace( tptr);
       }
    if( rval)
-      get_a_line( obuff, cptr);
+      get_a_line( obuff, obuff_size, cptr);
    if( orig_obuff)
-      strcpy( orig_obuff, temp_obuff);
+      strlcpy_err( orig_obuff, temp_obuff, obuff_size);
    return( rval);
 }
 
@@ -1126,4 +1299,11 @@ int fgets_with_ades_xlation( char *buff, const size_t len,
    *buff = '\0';
    cptr->prev_rval = prev_rval;
    return( prev_rval);
+}
+
+void ades_artsat_desigs( void *ades_context, const bool ignore_artsat_desigs)
+{
+   ades2mpc_t *cptr = (ades2mpc_t *)ades_context;
+
+   cptr->ignore_artsat_desigs = ignore_artsat_desigs;
 }

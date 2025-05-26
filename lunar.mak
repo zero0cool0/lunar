@@ -19,8 +19,8 @@ LIB_OBJS= ades2mpc.obj alt_az.obj astfuncs.obj \
       com_file.obj conbound.obj cospar.obj date.obj \
       de_plan.obj delta_t.obj dist_pa.obj  \
       elp82dat.obj eop_prec.obj getplane.obj \
-      get_time.obj jsats.obj lunar2.obj  \
-      miscell.obj mpc_code.obj mpc_fmt.obj moid.obj \
+      get_time.obj jsats.obj lunar2.obj miscell.obj mpc_code.obj \
+      mpc_fmt.obj mpc_fmt2.obj moid.obj nanosecs.obj \
       nutation.obj obliquit.obj pluto.obj precess.obj  \
       refract.obj refract4.obj rocks.obj showelem.obj sof.obj \
       snprintf.obj spline.obj ssats.obj \
@@ -49,6 +49,9 @@ COMMON_FLAGS = $(BASE_FLAGS)
 .cpp.obj:
    cl -c $(COMMON_FLAGS) $<
 
+.c.obj:
+   cl -c $(COMMON_FLAGS) $<
+
 $(LIBNAME).lib: $(LIB_OBJS)
    del $(LIBNAME).lib
 !ifdef DLL
@@ -67,7 +70,7 @@ clean:
    $(RM) eart2000.obj easter.obj get_test.obj gtest.obj
    $(RM) gust86.obj htc20b.obj jd.obj jevent.obj
    $(RM) jpl2b32.obj jsattest.obj lun_test.obj lun_tran.obj
-   $(RM) marstime.obj mpc_code.obj mpc_fmt.obj mpcorb.obj
+   $(RM) marstime.obj mpc_code.obj mpc_fmt.obj mpc_fmt2.obj mpcorb.obj
    $(RM) moidtest.obj mpc_time.obj mpc2sof.obj obliqui2.obj oblitest.obj
    $(RM) parallax.obj persian.obj phases.obj ps_1996.obj
    $(RM) prectest.obj prectes2.obj relativi.obj riseset3.obj
@@ -78,7 +81,7 @@ clean:
    $(RM) $(LIBNAME).dll
 
 add_off.exe:  add_off.obj $(LIBNAME).lib
-   $(LINK)    add_off.obj $(LIBNAME).lib
+   $(LINK)    add_off.obj $(LIBNAME).lib urlmon.lib
 
 adestest.exe: adestest.obj $(LIBNAME).lib
    $(LINK)    adestest.obj $(LIBNAME).lib
@@ -91,6 +94,9 @@ astephem.exe: astephem.obj eart2000.obj mpcorb.obj $(LIBNAME).lib
 
 calendar.exe: calendar.obj $(LIBNAME).lib
    $(LINK)    calendar.obj $(LIBNAME).lib
+
+chinese.exe: chinese.cpp snprintf.obj
+   cl -DTEST_CODE $(BASE_FLAGS) chinese.cpp snprintf.obj
 
 colors.exe: colors.cpp
    cl -DSIMPLE_TEST_PROGRAM $(BASE_FLAGS) colors.cpp
@@ -134,8 +140,8 @@ jsattest.exe: jsattest.obj $(LIBNAME).lib
 lun_test.exe: lun_test.obj lun_tran.obj riseset3.obj $(LIBNAME).lib
    $(LINK)    lun_test.obj lun_tran.obj riseset3.obj $(LIBNAME).lib
 
-marstime.exe: marstime.cpp
-   cl /DTEST_PROGRAM $(BASE_FLAGS) marstime.cpp
+marstime.exe: marstime.cpp snprintf.obj
+   cl /DTEST_PROGRAM $(BASE_FLAGS) marstime.cpp snprintf.obj
 
 moidtest.exe: moidtest.obj $(LIBNAME).lib
    $(LINK)    moidtest.obj $(LIBNAME).lib
@@ -191,6 +197,9 @@ test_des.exe: test_des.obj $(LIBNAME).lib
 test_ref.exe: test_ref.obj refract.obj refract4.obj
    $(LINK)    test_ref.obj refract.obj refract4.obj
 
+them_cat.exe: them_cat.c snprintf.obj
+   cl -DTEST_CODE $(BASE_FLAGS) them_cat.c snprintf.obj
+
 themis.exe:   themis.obj $(LIBNAME).lib
    $(LINK)    themis.obj $(LIBNAME).lib
 
@@ -216,5 +225,6 @@ install:
    copy mpc_func.h $(INSTALL_DIR)
    copy riseset3.h $(INSTALL_DIR)
    copy showelem.h $(INSTALL_DIR)
+   copy stringex.h $(INSTALL_DIR)
    copy vislimit.h $(INSTALL_DIR)
    copy watdefs.h  $(INSTALL_DIR)
