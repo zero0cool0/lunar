@@ -20,18 +20,18 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 
 /*  Underlying algorithms copied from :                                     */
 /*     http://www.giss.nasa.gov/tools/mars24/help/algorithm.html            */
-/* Routines to compute "Mars Coordinated Time" (MCT),  the Martian          */
-/* equivalent of UTC,  and "Mars True Solar Time (MTST) at Airy" (Airy is   */
+/* Routines to compute "Mars Mean Standard Time" (MST),  the Martian        */
+/* equivalent of TT,  and "Mars True Solar Time (MTST) at Airy" (Airy is    */
 /* the Martian equivalent of the Greenwich meridian),  for a given JDT.     */
 /* The "reverse" code to convert MTST to TT was added by me (Bill Gray).    */
-/*    A test case,  from the above URL:  if run with JDT=2451549.50074,     */
-/* one should get:                                                          */
+/*    A test case,  from the above URL:  if run with MJDT=51549.00074       */
+/* (the default value),  one should get:                                    */
 /*                                                                          */
-/* pbs = 0.001418; a_fms = 272.744861; v_minus_m = 4.441908                 */
-/* MTC = 44795.999760 (23:59:39.281); eot = -0.014410                       */
-/* LTST at Airy: 23:38:54.247                                               */
+/* pbs = 0.001418; a_fms = 272.74566102; v-m = 4.44192663; Ls = 277.1875876 */
+/* MST = 44795.999758 (23:59:39.057); eot = -0.014410                       */
+/* LTST at Airy: 23:38:53.998                                               */
 /*                                                                          */
-/*    The "recovered JD" should be equal to the input JDT of 2451549.50074; */
+/*    The "recovered MJD" should be equal to the input MJDT of 51549.00074; */
 /* i.e.,  the time transformations should all be correctly reversed.        */
 
 #include <math.h>
@@ -45,33 +45,33 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 
 const double days_per_sol = 1.0274912517;
 const double zero_sol_point = 44796.0 - 0.0009626;
-const double zero_jd_point = 2451549.5;
+const double zero_mjd_point = 51549.0;
 
-double tt_to_mtc( const double jd);
-double mtc_to_tt( const double mtc);
-double mars_true_solar_minus_mean_solar_time( const double jd);
+double tt_to_mst( const double mjd);
+double mst_to_tt( const double mst);
+double mars_true_solar_minus_mean_solar_time( const double mjd);
 double mtst_at_airy_to_tt( const double mtst);
 
-double tt_to_mtc( const double jd)
+double tt_to_mst( const double mjd)
 {
                                  /* eqn C-2: */
-   return( (jd - zero_jd_point) / days_per_sol + zero_sol_point);
+   return( (mjd - zero_mjd_point) / days_per_sol + zero_sol_point);
 }
 
-double mtc_to_tt( const double mtc)
+double mst_to_tt( const double mst)
 {
                                  /* C-2 equation reversed: */
-   return( (mtc - zero_sol_point) * days_per_sol + zero_jd_point);
+   return( (mst - zero_sol_point) * days_per_sol + zero_mjd_point);
 }
 
 /* "longitude_sun" = 0 degrees at the northern hemisphere vernal equinox;
 = 90 degrees at summer solstice,  = 180 at autumnal equinox,  = 270 at
 winter solstice. */
 
-double mars_true_solar_minus_mean_solar_time( const double jd)
+double mars_true_solar_minus_mean_solar_time( const double mjd)
 {
-   const double jd_2000 = 2451545.0;  /* JD 2451545.0 = 1.5 Jan 2000 */
-   const double t = jd - jd_2000;
+   const double mjd_2000 = 51544.5;  /* JD 2451545.0 = 1.5 Jan 2000 */
+   const double t = mjd - mjd_2000;
    const double pi =
       3.1415926535897932384626433832795028841971693993751058209749445923;
    const double D2R = pi / 180.;
@@ -110,7 +110,8 @@ double mars_true_solar_minus_mean_solar_time( const double jd)
 #endif
    longitude_sun = a_fms + v_minus_m;       /* eqn B-5 */
 #ifdef TEST_PROGRAM
-   printf( "a_fms = %f; v_minus_m = %f; longitude of sun = %f\n",
+   printf( "pbs = %f; ", pbs / D2R);
+   printf( "a_fms = %.8f; v-m = %.8f; Ls = %.8f\n",
             a_fms / D2R, v_minus_m / D2R, longitude_sun / D2R);
 #endif
    eqn_of_time = (2.861 / 360.) * sin( 2. * longitude_sun)   /* eqn C-1 */
@@ -124,29 +125,39 @@ double mars_true_solar_minus_mean_solar_time( const double jd)
 /* Reversing MTST (Mars True Solar Time) to other systems is made      */
 /* slightly tricky by the fact that the first step involves computing  */
 /* the equation of time,  which takes TT as an input.  So we pretend   */
-/* the input MTST is actually an MTC,  and compute a TT from it using  */
-/* mtc_to_tt.  This gives us an "approx_tt" which may be up to an hour */
-/* off (it basically is ignoring the Martian equation of time).        */
+/* the input MTST is actually an MST (Mars Mean Solar Time),  and      */
+/* compute a TT from it using mst_to_tt.  This gives us an "approx_tt" */
+/* which may be up to an hour off (it basically is ignoring the        */
+/* Martian equation of time).                                          */
 /*    However,  if we compute the Martian EOT using approx_tt,  we'll  */
 /* get a passably correct EOT and can use it to compute a better TT.   */
 /* And we can then compute the EOT using this better TT to get a still */
-/* better TT.  These two iterations of computing the EOT are enough to */
-/* get a "real" TT that's good to machine precision.                   */
+/* better TT.  Continued iterations would converge linearly;  we use   */
+/* just two iterations,  then compute a more 'exact' TT using Aitken's */
+/* delta-squared sequence method for accelerated convergence.  The     */
+/* result is good to machine precision.                                */
 
 double mtst_at_airy_to_tt( const double mtst)
 {
-   const double approx_tt = mtc_to_tt( mtst);
-   double rval = approx_tt;
-   int iter;
+   const double approx_tt = mst_to_tt( mtst);
+   double rval[3], d1, d2, x;
+   size_t i;
 
-   for( iter = 2; iter; iter--)
+   rval[0] = approx_tt;
+   for( i = 1; i < 3; i++)
       {
       const double eqn_of_time =
-              mars_true_solar_minus_mean_solar_time( rval);
+              mars_true_solar_minus_mean_solar_time( rval[i - 1]);
+      const double delta = approx_tt - eqn_of_time * days_per_sol - rval[i - 1];
 
-      rval = approx_tt - eqn_of_time * days_per_sol;
+      rval[i] = rval[i - 1] + delta;
+      printf( "iter %d : %.10f\n", (int)i, rval[i]);
       }
-   return( rval);
+   d1 = rval[2] - rval[1];             /* Aitken delta-squared */
+   d2 = rval[1] - rval[0];
+   x = rval[2] - d1 * d1 / (d1 - d2);
+   printf( "Aitken %.10f\n", x);
+   return( x);
 }
 
 #ifdef TEST_PROGRAM
@@ -165,23 +176,23 @@ static void format_time( const double day, char *buff)
 
 int main( const int argc, const char **argv)
 {
-   const double jd = (argc > 1 ? atof( argv[1]) : 2451549.50074);
-   const double mtc = tt_to_mtc( jd);
-   const double eot = mars_true_solar_minus_mean_solar_time( jd);
-   const double ltst_at_airy = mtc + eot;
+   const double mjd = (argc > 1 ? atof( argv[1]) : 51549.00074);
+   const double mst = tt_to_mst( mjd);
+   const double eot = mars_true_solar_minus_mean_solar_time( mjd);
+   const double ltst_at_airy = mst + eot;
    char buff[80];
 
             /* Above equation of time = true - mean time. */
-   format_time( mtc, buff);
-   printf( "MTC = %f (%s); eot = %f\n", mtc, buff, eot);
+   format_time( mst, buff);
+   printf( "MST = %f (%s); eot = %f\n", mst, buff, eot);
    format_time( ltst_at_airy, buff);
    printf( "LTST at Airy: %s\n", buff);
-   printf( "Recovered JD: %.8f\n", mtst_at_airy_to_tt( ltst_at_airy));
+   printf( "Recovered MJD: %.10f\n", mtst_at_airy_to_tt( ltst_at_airy));
    if( argc > 2)                  /* West longitudes are positive */
       {
       const double lon = atof( argv[2]);
       const double ltst = ltst_at_airy - lon / 360.;
-      const double lmst = mtc - lon / 360.;
+      const double lmst = mst - lon / 360.;
 
       format_time( ltst, buff);
       printf( "LTST at loc: %s\n", buff);

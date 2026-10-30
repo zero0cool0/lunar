@@ -64,6 +64,7 @@ it corresponds to a known spacecraft observatory.  Otherwise,  it'll
 be an empty string. */
 
 char mpc_code_from_ades[4];
+static double timing_offset = 0.;
 
 static double get_sat_obs_jd( const char *buff)
 {
@@ -71,8 +72,13 @@ static double get_sat_obs_jd( const char *buff)
    const char *ades_time = strstr( buff, "<obsTime>");
    const char *ades_stn = strstr( buff, "<stn>");
 
-   if( ades_stn && get_horizons_idx( ades_stn + 5))
-      memcpy( mpc_code_from_ades, ades_stn + 5, 3);
+   if( ades_stn)
+      {
+      if( get_horizons_idx( ades_stn + 5))
+         memcpy( mpc_code_from_ades, ades_stn + 5, 3);
+      else
+         *mpc_code_from_ades = '\0';
+      }
    if( strlen( buff) > 80 && (buff[14] == 'S' || buff[14] == 's'))
       jd = extract_date_from_mpc_report( buff, NULL);
    if( ades_time && *mpc_code_from_ades)
@@ -81,15 +87,16 @@ static double get_sat_obs_jd( const char *buff)
       size_t i = 0;
 
       ades_time += 9;
-      while( *ades_time != 'Z' && *ades_time && i < sizeof( tbuff))
+      while( *ades_time != 'Z' && *ades_time && i < sizeof( tbuff) - 1)
          tbuff[i++] = *ades_time++;
+      tbuff[i] = '\0';
       jd = get_time_from_string( 0., tbuff, FULL_CTIME_YMD, NULL);
       }
 
    if( jd < hst_launch_jd)
       jd = 0.;
    else
-      jd += td_minus_utc( jd) / seconds_per_day;
+      jd += (td_minus_utc( jd) + timing_offset) / seconds_per_day;
    return( jd);
 }
 
@@ -223,10 +230,10 @@ static int set_offsets( offset_t *offsets, const int n_offsets)
 
    if( !horizons_idx)
       {
-      printf( "ERROR! MPC code '%s' wasn't found.\n", offsets->mpc_code);
-      printf( "Either it's not an MPC code,  or it's not one of the spacecraft\n");
-      printf( "that this software knows about.  Check the 'add_off.c' source\n");
-      printf( "code,  and/or contact the author.\n");
+      fprintf( stderr, "ERROR! MPC code '%s' wasn't found.\n", offsets->mpc_code);
+      fprintf( stderr, "Either it's not an MPC code,  or it's not one of the spacecraft\n");
+      fprintf( stderr, "that this software knows about.  Check the 'add_off.c' source\n");
+      fprintf( stderr, "code,  and/or contact the author.\n");
       for( i = 0; i < n_offsets; i++)
          if( !strcmp( offsets[i].mpc_code, offsets[0].mpc_code))
             offsets[i].xyz[0] = -0.1;     /* mark as "don't try again" */
@@ -315,9 +322,9 @@ static int set_offsets( offset_t *offsets, const int n_offsets)
    else
       {
 #ifdef _WIN32
-      printf( "Error from URLDownloadToFile : %d\n", error_code);
+      fprintf( stderr, "Error from URLDownloadToFile : %d\n", error_code);
 #else
-      printf( "Error with system() : '%s'\n", strerror( errno));
+      fprintf( stderr, "Error with system() : '%s'\n", strerror( errno));
 #endif
       printf( "'%s'\n", buff);
       }
@@ -342,17 +349,40 @@ static char *ades_posvel( char *buff, const double value)
 }
 
    /* When processing ADES observations,  they may already contain
-   spacecraft offsets with the '<pos#>',  '<vel#>', <ctr>,  etc.  We
-   don't pass those through to the output,  since they're (we hope)
+   spacecraft offsets with the '<pos#>',  '<vel#>', <ctr>,  etc.  If
+   these are for a spacecraft,  we strip them,  since they are (we hope)
    getting replaced. */
 
-static bool ades_posn_tag( const char *buff)
+static void remove_ades_posn_tags( char *buff)
 {
-   return( strstr( buff, "<pos") || strstr( buff, "<vel")
-               || strstr( buff, "<ctr>") || strstr( buff, "<sys>"));
+   const char *removers[] = { "pos1>", "pos2>", "pos3>", "vel1>", "vel2>", "vel3>",
+                  "ctr>", "sys>" };
+   char *open_tag, *close_tag;
+   size_t i;
+
+   for( i = 0; i < sizeof( removers) / sizeof( removers[0]); i++)
+      if( NULL != (open_tag = strstr( buff, removers[i]))
+               && open_tag > buff && open_tag[-1] == '<'
+               && NULL != (close_tag = strstr( open_tag + 1, removers[i]))
+               && close_tag[-1] == '/' && close_tag[-2] == '<')
+         {
+         close_tag += strlen( removers[i]);
+         memmove( open_tag - 1, close_tag, strlen( close_tag) + 1);
+         }
+   i = 0;
+   while( buff[i] == ' ')
+      i++;
+   if( buff[i] < ' ')     /* we removed everything except spaces and CR/LF */
+      *buff = '\0';
 }
 
-bool show_offsets_from_original = false;
+static bool show_offsets_from_original = false;
+static bool ades_found = false;
+#ifdef ON_LINE_VERSION
+static const char *content_type_text = "Content-type: text/html\n\n"
+                                       "<html> <body> <pre>\n";
+static const char *content_type_xml = "Content-type: text/xml\n";
+#endif
 
 /* The following reads the input file and looks for 80-column obs from
 spacecraft.  It then finds out where the spacecraft in question (there
@@ -399,7 +429,6 @@ int process_file( const char *filename, FILE *ofile)
    time_t t0 = time( NULL);
    offset_t *offsets = NULL;
    int i, n_offsets = 0;
-   bool ades_found = false;
 
    assert( ifile);
    while( fgets( buff, sizeof( buff), ifile))
@@ -439,14 +468,19 @@ int process_file( const char *filename, FILE *ofile)
       if( !offsets[i].xyz[0] && offsets[i].mpc_code[0])
          set_offsets( offsets + i, n_offsets - i);
       }
+#ifdef ON_LINE_VERSION
+   fputs( ades_found ? content_type_xml : content_type_text, ofile);
+#endif
    if( !ades_found)
-      fprintf( ofile, "COM add_off ver 2025 Jan 02,  run %.24s UTC\n", asctime( gmtime( &t0)));
+      fprintf( ofile, "COM add_off ver 2025 Aug 08,  run %.24s UTC\n", asctime( gmtime( &t0)));
    fseek( ifile, 0, SEEK_SET);
    while( fgets( buff, sizeof( buff), ifile))
       if( (jd = get_sat_obs_jd( buff)) <= 0.)    /* not an observation;  */
          {                                       /* just pass it through */
-         if( !ades_posn_tag( buff))          /* unless it's an ADES posn tag */
-            fprintf( ofile, "%s", buff);
+         if( *mpc_code_from_ades)
+            remove_ades_posn_tags( buff);
+         if( *buff)
+            fprintf( ofile, "%s", buff);         /* unless it's an ADES posn tag */
          }
       else if( buff[14] != 's' || *mpc_code_from_ades)
          {
@@ -503,6 +537,7 @@ int process_file( const char *filename, FILE *ofile)
          }
    fclose( ifile);
    free( offsets);
+#ifndef ON_LINE_VERSION
    snprintf( buff, sizeof( buff),
          "COM %d positions set by add_off; %d failed in %.2f seconds\n",
          n_positions_set, n_positions_failed,
@@ -511,6 +546,7 @@ int process_file( const char *filename, FILE *ofile)
       fprintf( ofile, "%s", buff);
    if( ofile != stdout)
       printf( "%s", buff + 4);
+#endif
    return( 0);
 }
 
@@ -555,6 +591,9 @@ int main( const int argc, const char **argv)
             case 'd':
                show_offsets_from_original = true;
                break;
+            case 'o':
+               timing_offset = atof( argv[i] + 2);
+               break;
             default:
                printf( "Option '%s' unrecognized\n", argv[i]);
                break;
@@ -568,7 +607,7 @@ int main( const int argc, const char **argv)
 int main( void)
 {
    const char *argv[20];
-   const size_t max_buff_size = 40000;
+   const size_t max_buff_size = 4000000;
    char *buff = (char *)malloc( max_buff_size);
    char field[30];
    FILE *lock_file = fopen( "lock.txt", "w");
@@ -578,12 +617,11 @@ int main( void)
    size_t i, bytes_written = 0;
 
    avoid_runaway_process( 15);
-   printf( "Content-type: text/html\n\n");
-   printf( "<html> <body> <pre>\n");
    if( !lock_file)
       {
+      fputs( content_type_text, stdout);
       printf( "<p> Server is busy.  Try again in a minute or two. </p>");
-      printf( "<p> Your TLEs are very important to us! </p>");
+      printf( "<p> Your spacecraft-based observations are very important to us! </p>");
       return( 0);
       }
    setbuf( lock_file, NULL);
@@ -594,6 +632,7 @@ int main( void)
    fprintf( lock_file, "CGI status %d\n", cgi_status);
    if( cgi_status <= 0)
       {
+      fputs( content_type_text, stdout);
       printf( "<p> <b> CGI data reading failed : error %d </b>", cgi_status);
       printf( "This isn't supposed to happen.</p>\n");
       return( 0);
@@ -627,7 +666,8 @@ int main( void)
    argv[2] = NULL;
    dummy_main( 2, argv);
    fprintf( lock_file, "Done\n");
-   printf( "</pre> </body> </html>");
+   if( !ades_found)
+      printf( "</pre> </body> </html>");
    fclose( lock_file);
    return( 0);
 }

@@ -41,7 +41,9 @@ ifdef UCHAR
  CXXFLAGS += -funsigned-char
 endif
 
-ifdef DEBUG
+ifdef NDEBUG
+	CPPFLAGS += -DNDEBUG
+else
 	CFLAGS += -g
 	CXXFLAGS += -g
 endif
@@ -129,9 +131,9 @@ endif
 
 all: add_off$(EXE) add_off.cgi adestest$(EXE) astcheck$(EXE) astephem$(EXE) \
    calendar$(EXE) cgicheck$(EXE) chinese$(EXE) colors$(EXE) \
-   colors2$(EXE) cosptest$(EXE) csv2ades$(EXE) dist$(EXE) \
+   colors2$(EXE) cosptest$(EXE) csv2ades$(EXE) desigcgi$(EXE) dist$(EXE) \
    easter$(EXE) get_test$(EXE) gtest$(EXE) htc20b$(EXE) jd$(EXE)\
-   jevent$(EXE) jpl2b32$(EXE) jsattest$(EXE) lun_test$(EXE) \
+   jevent$(EXE) jpl2b32$(EXE) jpl_url$(EXE) jsattest$(EXE) lun_test$(EXE) \
    marstime$(EXE) moidtest$(EXE) mpc2sof$(EXE) mpc_time$(EXE) oblitest$(EXE) \
    persian$(EXE) parallax$(EXE) parallax.cgi phases$(EXE) \
    prectest$(EXE) prectes2$(EXE) ps_1996$(EXE) ssattest$(EXE) \
@@ -181,10 +183,10 @@ uninstall:
 	rm -f $(INSTALL_DIR)/bin/integrat$(EXE)
 
 .cpp.o:
-	$(CXX) $(CXXFLAGS) -c $<
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -c $<
 
 .c.o:
-	$(CC) $(CFLAGS) -c $<
+	$(CC) $(CPPFLAGS) $(CFLAGS) -c $<
 
 OBJS= alt_az.o ades2mpc.o astfuncs.o big_vsop.o  \
    brentmin.o cgi_func.o classel.o conbound.o cospar.o date.o  \
@@ -201,7 +203,7 @@ clean:
 	$(RM) $(OBJS)
 	$(RM) adestest.o add_off.o astcheck.o astephem.o calendar.o cgicheck.o
 	$(RM) cosptest.o csv2ades.o get_test.o gtest.o gust86.o htc20b.o integrat.o jd.o
-	$(RM) jevent.o jpl2b32.o jsattest.o lun_test.o lun_tran.o mms.o
+	$(RM) jevent.o jpl2b32.o jpl_url.o jsattest.o lun_test.o lun_tran.o mms.o
 	$(RM) moidtest.o mpcorb.o oblitest.o obliqui2.o persian.o phases.o
 	$(RM) prectes2.o prectest.o ps_1996.o refract.o refract4.o riseset3.o solseqn.o
 	$(RM) ssattest.o tables.o test_des.o test_ref.o testprec.o
@@ -209,9 +211,9 @@ clean:
 	$(RM) add_off$(EXE) add_off.cgi
 	$(RM) adestest$(EXE) astcheck$(EXE) astephem$(EXE) calendar$(EXE)
 	$(RM) cgicheck$(EXE) chinese$(EXE) colors$(EXE)
-	$(RM) colors2$(EXE) cosptest$(EXE) csv2ades$(EXE) dist$(EXE)
+	$(RM) colors2$(EXE) cosptest$(EXE) csv2ades$(EXE) desigcgi$(EXE) dist$(EXE)
 	$(RM) easter$(EXE) get_test$(EXE) gtest$(EXE) htc20b$(EXE)
-	$(RM) integrat$(EXE) jd$(EXE) jevent$(EXE) jpl2b32$(EXE)
+	$(RM) integrat$(EXE) jd$(EXE) jevent$(EXE) jpl2b32$(EXE) jpl_url$(EXE)
 	$(RM) jsattest$(EXE) lun_test$(EXE) marstime$(EXE) moidtest$(EXE) mms$(EXE)
 	$(RM) mpc2sof$(EXE) mpc_time$(EXE) oblitest$(EXE) parallax$(EXE) parallax.cgi
 	$(RM) persian$(EXE) phases$(EXE) prectest$(EXE) prectes2$(EXE)
@@ -220,161 +222,167 @@ clean:
 	$(RM) them_cat$(EXE) transit$(EXE) uranus1$(EXE) utc_test$(EXE) $(LIBLUNAR)
 
 add_off$(EXE): add_off.c $(LIBLUNAR) jpl_xref.h mpc_func.h
-	$(CC) $(CFLAGS) -o add_off$(EXE) add_off.c $(LIBLUNAR) $(LIBSADDED) $(LIBURLMON)
+	$(CC) $(LDFLAGS) $(CPPFLAGS) $(CFLAGS) -o add_off$(EXE) add_off.c $(LIBLUNAR) $(LIBSADDED) $(LIBURLMON)
 
 add_off.cgi: add_off.c $(LIBLUNAR) jpl_xref.h mpc_func.h
-	$(CC) $(CFLAGS) -o add_off.cgi -DON_LINE_VERSION add_off.c $(LIBLUNAR) $(LIBSADDED) $(LIBURLMON)
+	$(CC) $(LDFLAGS) $(CPPFLAGS) $(CFLAGS) -o add_off.cgi -DON_LINE_VERSION add_off.c $(LIBLUNAR) $(LIBSADDED) $(LIBURLMON)
 
 adestest$(EXE): adestest.o $(LIBLUNAR)
-	$(CXX) $(CFLAGS) -o adestest$(EXE) adestest.o $(LIBLUNAR) $(LIBSADDED)
+	$(CXX) $(LDFLAGS) $(CFLAGS) -o adestest$(EXE) adestest.o $(LIBLUNAR) $(LIBSADDED)
 
 astcheck$(EXE): astcheck.o $(LIBLUNAR)
-	$(CXX) $(CFLAGS) -o astcheck$(EXE) astcheck.o $(LIBLUNAR) $(LIBSADDED)
+	$(CXX) $(LDFLAGS) $(CFLAGS) -o astcheck$(EXE) astcheck.o $(LIBLUNAR) $(LIBSADDED)
 
 astephem$(EXE): astephem.o mpcorb.o $(LIBLUNAR)
-	$(CXX) $(CFLAGS) -o astephem$(EXE) astephem.o mpcorb.o $(LIBLUNAR) $(LIBSADDED)
+	$(CXX) $(LDFLAGS) $(CFLAGS) -o astephem$(EXE) astephem.o mpcorb.o $(LIBLUNAR) $(LIBSADDED)
 
 calendar$(EXE): calendar.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o calendar$(EXE) calendar.o   $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o calendar$(EXE) calendar.o   $(LIBLUNAR) $(LIBSADDED)
 
 cgicheck$(EXE): astcheck.cpp $(LIBLUNAR) cgicheck.o
-	$(CXX) $(CXXFLAGS) -o cgicheck$(EXE) -DCGI_VERSION cgicheck.o astcheck.cpp $(LIBLUNAR) $(LIBSADDED)
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o cgicheck$(EXE) -DCGI_VERSION cgicheck.o astcheck.cpp $(LIBLUNAR) $(LIBSADDED)
 
 chinese$(EXE): chinese.cpp snprintf.o
-	$(CXX) $(CXXFLAGS) -o chinese$(EXE) chinese.cpp snprintf.o
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o chinese$(EXE) chinese.cpp snprintf.o
 
 colors$(EXE): colors.cpp
-	$(CXX) $(CXXFLAGS) -o colors$(EXE) colors.cpp -DSIMPLE_TEST_PROGRAM
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o colors$(EXE) colors.cpp -DSIMPLE_TEST_PROGRAM
 
 colors2$(EXE): colors2.cpp
-	$(CXX) $(CXXFLAGS) -o colors2$(EXE) colors2.cpp -DTEST_FUNC
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o colors2$(EXE) colors2.cpp -DTEST_FUNC
 
 cosptest$(EXE): cosptest.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o cosptest$(EXE) cosptest.o   $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o cosptest$(EXE) cosptest.o   $(LIBLUNAR) $(LIBSADDED)
 
 csv2ades$(EXE): csv2ades.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o csv2ades$(EXE) csv2ades.o   $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o csv2ades$(EXE) csv2ades.o   $(LIBLUNAR) $(LIBSADDED)
+
+desigcgi$(EXE): desigcgi.c $(LIBLUNAR)
+	$(CC) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o desigcgi$(EXE) desigcgi.c $(LIBLUNAR) $(LIBSADDED)
 
 dist$(EXE): dist.cpp
-	$(CXX) $(CXXFLAGS) -o dist$(EXE) dist.cpp $(LIBSADDED)
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o dist$(EXE) dist.cpp $(LIBSADDED)
 
 easter$(EXE): easter.cpp $(LIBLUNAR)
-	$(CXX) $(CXXFLAGS) -o easter$(EXE) -DTEST_CODE easter.cpp $(LIBLUNAR) $(LIBSADDED)
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o easter$(EXE) -DTEST_CODE easter.cpp $(LIBLUNAR) $(LIBSADDED)
 
 get_test$(EXE): get_test.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o get_test$(EXE) get_test.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o get_test$(EXE) get_test.o $(LIBLUNAR) $(LIBSADDED)
 
 gtest$(EXE): gtest.c
-	$(CC) $(CFLAGS) -o gtest$(EXE) gtest.c $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CPPFLAGS) $(CFLAGS) -o gtest$(EXE) gtest.c $(LIBSADDED)
 
 htc20b$(EXE): htc20b.cpp $(LIBLUNAR)
-	$(CXX) $(CXXFLAGS) -o htc20b$(EXE) -DTEST_MAIN htc20b.cpp $(LIBLUNAR) $(LIBSADDED)
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o htc20b$(EXE) -DTEST_MAIN htc20b.cpp $(LIBLUNAR) $(LIBSADDED)
 
 integrat$(EXE): integrat.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o integrat$(EXE) integrat.o $(LIBLUNAR) $(LIBSADDED) -L $(INSTALL_DIR)/lib -ljpl
+	$(CC) $(LDFLAGS) $(CFLAGS) -o integrat$(EXE) integrat.o $(LIBLUNAR) $(LIBSADDED) -L $(INSTALL_DIR)/lib -ljpl
 
 integrat.o: integrat.cpp
-	$(CXX) $(CXXFLAGS) -c -I $(INSTALL_DIR)/include $<
+	$(CXX) $(CPPFLAGS) $(CXXFLAGS) -I $(INSTALL_DIR)/include -c $<
 
 jd$(EXE): jd.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o jd$(EXE) jd.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o jd$(EXE) jd.o $(LIBLUNAR) $(LIBSADDED)
 
 jevent$(EXE):                    jevent.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o jevent$(EXE) jevent.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o jevent$(EXE) jevent.o $(LIBLUNAR) $(LIBSADDED)
 
 jpl2b32$(EXE):                    jpl2b32.o
-	$(CC) $(CFLAGS) -o jpl2b32$(EXE) jpl2b32.o $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o jpl2b32$(EXE) jpl2b32.o $(LIBSADDED)
+
+jpl_url$(EXE):                    jpl_url.o $(LIBLUNAR)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o jpl_url$(EXE) jpl_url.o $(LIBLUNAR) $(LIBSADDED)
 
 jsattest$(EXE): jsattest.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o jsattest$(EXE) jsattest.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o jsattest$(EXE) jsattest.o $(LIBLUNAR) $(LIBSADDED)
 
 lun_test$(EXE): lun_test.o lun_tran.o riseset3.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o lun_test$(EXE) lun_test.o lun_tran.o riseset3.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o lun_test$(EXE) lun_test.o lun_tran.o riseset3.o $(LIBLUNAR) $(LIBSADDED)
 
 marstime$(EXE): marstime.cpp snprintf.o
-	$(CXX) $(CXXFLAGS) -o marstime$(EXE) marstime.cpp snprintf.o -DTEST_PROGRAM $(LIBSADDED)
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o marstime$(EXE) marstime.cpp snprintf.o -DTEST_PROGRAM $(LIBSADDED)
 
 mms$(EXE):                    mms.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o mms$(EXE) mms.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o mms$(EXE) mms.o $(LIBLUNAR) $(LIBSADDED)
 
 moidtest$(EXE): moidtest.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o moidtest$(EXE) moidtest.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o moidtest$(EXE) moidtest.o $(LIBLUNAR) $(LIBSADDED)
 
 mpc2sof$(EXE): mpc2sof.cpp mpcorb.o $(LIBLUNAR) watdefs.h date.h comets.h stringex.h
-	$(CXX) $(CXXFLAGS) -o mpc2sof$(EXE) mpc2sof.cpp mpcorb.o $(LIBLUNAR) $(LIBSADDED)
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o mpc2sof$(EXE) mpc2sof.cpp mpcorb.o $(LIBLUNAR) $(LIBSADDED)
 
 mpc_code$(EXE): mpc_code.cpp snprintf.o mpc_func.h watdefs.h mpc_func.h lunar.h stringex.h
-	$(CXX) $(CXXFLAGS) -o mpc_code$(EXE) mpc_code.cpp snprintf.o -DTEST_CODE
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o mpc_code$(EXE) mpc_code.cpp snprintf.o -DTEST_CODE
 
 oblitest$(EXE): oblitest.o obliqui2.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o oblitest$(EXE) oblitest.o obliqui2.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o oblitest$(EXE) oblitest.o obliqui2.o $(LIBLUNAR) $(LIBSADDED)
 
 parallax.cgi: parallax.cpp $(LIBLUNAR) watdefs.h afuncs.h mpc_func.h stringex.h
-	$(CXX) $(CXXFLAGS) -o parallax.cgi parallax.cpp $(LIBLUNAR) $(LIBSADDED) -DCGI_VERSION
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o parallax.cgi parallax.cpp $(LIBLUNAR) $(LIBSADDED) -DCGI_VERSION
 
 parallax$(EXE): parallax.cpp $(LIBLUNAR) watdefs.h afuncs.h mpc_func.h stringex.h
-	$(CXX) $(CXXFLAGS) -o parallax$(EXE) parallax.cpp $(LIBLUNAR) $(LIBSADDED)
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o parallax$(EXE) parallax.cpp $(LIBLUNAR) $(LIBSADDED)
 
 persian$(EXE): persian.o solseqn.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o persian$(EXE) persian.o solseqn.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o persian$(EXE) persian.o solseqn.o $(LIBLUNAR) $(LIBSADDED)
 
 phases$(EXE): phases.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o phases$(EXE)   phases.o   $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o phases$(EXE)   phases.o   $(LIBLUNAR) $(LIBSADDED)
 
 prectest$(EXE): prectest.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o prectest$(EXE) prectest.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o prectest$(EXE) prectest.o $(LIBLUNAR) $(LIBSADDED)
 
 prectes2$(EXE): prectes2.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o prectes2$(EXE) prectes2.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o prectes2$(EXE) prectes2.o $(LIBLUNAR) $(LIBSADDED)
 
 ps_1996$(EXE): ps_1996.cpp $(LIBLUNAR) watdefs.h mpc_func.h lunar.h afuncs.h date.h stringex.h
-	$(CC) $(CFLAGS) -o ps_1996$(EXE) ps_1996.cpp $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CPPFLAGS) $(CFLAGS) -o ps_1996$(EXE) ps_1996.cpp $(LIBLUNAR) $(LIBSADDED)
 
 relativi$(EXE): relativi.cpp $(LIBLUNAR)
-	$(CXX) $(CXXFLAGS) -o relativi$(EXE) -DTEST_CODE relativi.cpp $(LIBLUNAR) $(LIBSADDED)
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -o relativi$(EXE) -DTEST_CODE relativi.cpp $(LIBLUNAR) $(LIBSADDED)
 
 sof$(EXE): sof.cpp $(LIBLUNAR)
-	$(CXX) $(CXXFLAGS) -DTEST_CODE -o sof$(EXE) sof.cpp -lm $(LIBLUNAR)
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -DTEST_CODE -o sof$(EXE) sof.cpp -lm $(LIBLUNAR)
 
 solseqn$(EXE): solseqn.cpp $(LIBLUNAR)
-	$(CXX) $(CXXFLAGS) -DTEST_CODE -o solseqn$(EXE) solseqn.cpp -lm $(LIBLUNAR)
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -DTEST_CODE -o solseqn$(EXE) solseqn.cpp -lm $(LIBLUNAR)
 
 spline$(EXE): spline.cpp
-	$(CXX) $(CXXFLAGS) -DTEST_CODE -o spline$(EXE) spline.cpp -lm
+	$(CXX) $(LDFLAGS) $(CPPFLAGS) $(CXXFLAGS) -DTEST_CODE -o spline$(EXE) spline.cpp -lm
 
 ssattest$(EXE): ssattest.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o ssattest$(EXE) ssattest.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o ssattest$(EXE) ssattest.o $(LIBLUNAR) $(LIBSADDED)
 
 tables$(EXE):                    tables.o riseset3.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o tables$(EXE) tables.o riseset3.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o tables$(EXE) tables.o riseset3.o $(LIBLUNAR) $(LIBSADDED)
 
 test_des$(EXE):                    test_des.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o test_des$(EXE) test_des.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o test_des$(EXE) test_des.o $(LIBLUNAR) $(LIBSADDED)
 
 test_ref$(EXE):                    test_ref.o refract.o refract4.o
-	$(CC) $(CFLAGS) -o test_ref$(EXE) test_ref.o refract.o refract4.o $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o test_ref$(EXE) test_ref.o refract.o refract4.o $(LIBSADDED)
 
 testprec$(EXE):                    testprec.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o testprec$(EXE) testprec.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o testprec$(EXE) testprec.o $(LIBLUNAR) $(LIBSADDED)
 
 test_min$(EXE):                    test_min.o brentmin.o
-	$(CC) $(CFLAGS) -o test_min$(EXE) test_min.o brentmin.o $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o test_min$(EXE) test_min.o brentmin.o $(LIBSADDED)
 
 them_cat$(EXE): them_cat.c snprintf.o
-	$(CC) $(CFLAGS) -o them_cat$(EXE) them_cat.c snprintf.o
+	$(CC) $(LDFLAGS) $(CPPFLAGS) $(CFLAGS) -o them_cat$(EXE) them_cat.c snprintf.o
 
 mpc_time$(EXE):                    mpc_time.c $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o mpc_time$(EXE) mpc_time.c $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CPPFLAGS) $(CFLAGS) -o mpc_time$(EXE) mpc_time.c $(LIBLUNAR) $(LIBSADDED)
 
 themis$(EXE):                    themis.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o themis$(EXE) themis.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o themis$(EXE) themis.o $(LIBLUNAR) $(LIBSADDED)
 
 transit$(EXE):                    transit.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o transit$(EXE) transit.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o transit$(EXE) transit.o $(LIBLUNAR) $(LIBSADDED)
 
 uranus1$(EXE): uranus1.o gust86.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o uranus1$(EXE) uranus1.o gust86.o $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o uranus1$(EXE) uranus1.o gust86.o $(LIBSADDED)
 
 utc_test$(EXE):                utc_test.o $(LIBLUNAR)
-	$(CC) $(CFLAGS) -o utc_test$(EXE) utc_test.o $(LIBLUNAR) $(LIBSADDED)
+	$(CC) $(LDFLAGS) $(CFLAGS) -o utc_test$(EXE) utc_test.o $(LIBLUNAR) $(LIBSADDED)
 

@@ -563,6 +563,7 @@ static void err_message( void)
    printf( "   -z(tol)    Set motion match tolerance to 'tol' arcsec/hr. Default is 10.\n");
    printf( "   -m(mag)    Set limiting mag to 'mag'.  Default is 22.\n");
    printf( "   -l         Show distance from line of variations. Experimental.\n");
+   printf( "   -h         No headers.\n");
    printf( "Alternatively,  one can get a list of asteroids/comets within a desired\n");
    printf( "area with\n\n");
    printf( "astcheck -c (date) (RA in degrees) (dec in degrees) (MPC code) (options)\n\n");
@@ -572,8 +573,125 @@ static void err_message( void)
 
 static void show_astcheck_info( void)
 {
-   printf( "ASTCHECK version %s %s\n", __DATE__, __TIME__);
+   printf( "ASTCHECK version %s\n", VERSION_DATE);
    printf( "%d objects\n", n_asteroids);
+}
+
+#define JSON_BUFF_SIZE   40
+
+static char *format_for_json( char *obuff, const char *fmt, const double ival)
+{
+   size_t i;
+
+   snprintf( obuff, JSON_BUFF_SIZE, fmt, ival);
+   i = strlen( obuff);
+   while( i && obuff[i - 1] == '0')
+      i--;
+   if( i && obuff[i - 1] == '.')
+      i--;
+   obuff[i] = '\0';
+   return( obuff);
+}
+
+/* JSON _input_ files (lists of pointings) are not entirely standardized.  We
+assume something resembling the MPC 'standard' here.  As we read the input,
+we look for the various fields -- RA,  dec,  time,  etc. -- and accumulate
+them.  Once we get the RA/dec and a closing right brace,  we figure we've
+got all the bits,  format an output line,  and parse_coverage_json( ) can
+return a non-zero value to indicate success.       */
+
+static char *get_json_string( char *obuff, const char *ibuff, const size_t obuff_size)
+{
+   const char *tptr = strchr( ibuff + 1, '"');
+   size_t len;
+
+   assert( *ibuff == '"');
+   assert( tptr);
+   ibuff++;
+   len = tptr - ibuff;
+   assert( len < obuff_size - 1);
+   memcpy( obuff, ibuff, len);
+   obuff[len] = '\0';
+   return( obuff);
+}
+
+/* By default,  if a field goes to magnitude m_limit,  we output matches
+to one magnitude fainter,  in case an object just happens to be bright
+enough during that exposure to show up anyway (and/or the computed magnitude
+is simply wrong by that much).  'magnitude_add_on' can be reset with the
+-a command line option.       */
+
+static double magnitude_add_on = 1.;
+
+static int parse_coverage_json( char *obuff, char *ibuff)
+{
+   static char survey_name[100], mpc_code[5];
+   static double duration = -1., limit = -1., ra = -1., dec = -1.;
+   static double width = -1., height = -1., mjd = -1.;
+   static int got_center = -1;
+   char *tptr = NULL;
+   int rval = 0;
+
+   while( *ibuff == ' ')
+      ibuff++;
+   if( *ibuff == '"')
+      {
+      ibuff++;
+      tptr = strstr( ibuff, "\":");
+      if( tptr)
+         {
+         *tptr = '\0';
+         tptr += 3;
+         if( !strcmp( ibuff, "mpcCode"))
+            get_json_string( mpc_code, tptr, sizeof( mpc_code));
+         else if( !strcmp( ibuff, "time"))
+            {
+            char time[50];
+
+            get_json_string( time, tptr, sizeof( time));
+            mjd = get_time_from_string( 0., time, FULL_CTIME_YMD, NULL) - 2400000.5;
+            }
+         else if( !strcmp( ibuff, "height"))
+            height = atof( tptr);
+         else if( !strcmp( ibuff, "width"))
+            width = atof( tptr);
+         else if( !strcmp( ibuff, "fieldDiam"))
+            height = width = atof( tptr);
+         else if( !strcmp( ibuff, "limit"))
+            limit = atof( tptr);
+         else if( !strcmp( ibuff, "duration"))
+            duration = atof( tptr);
+         else if( !strcmp( ibuff, "surveyExpName"))
+            get_json_string( survey_name, tptr, sizeof( survey_name));
+         else if( !strcmp( ibuff, "center"))
+            {
+            got_center = sscanf( tptr, "%lf,%lf", &ra, &dec);
+            if( got_center == -1)
+               got_center = 0;
+            }
+         }
+      }
+   else if( !got_center)
+      {
+      got_center = sscanf( ibuff, "%lf,%lf", &ra, &dec);
+      if( got_center == -1)
+         got_center = 0;
+      }
+   else if( got_center == 1)
+      {
+      got_center += sscanf( ibuff, "%lf", &dec);
+      if( got_center == -1)
+         got_center = 1;
+      }
+   if( 2 == got_center && strchr( ibuff, '}'))
+      {
+      got_center = 0;
+      snprintf( obuff, 200, "%s %11.5f %11.5f %5.2f %5.2f %5.2f %6.1f %11.5f %s", mpc_code,
+                 ra, dec, width, height, limit + magnitude_add_on,
+                 duration, mjd, survey_name);
+      rval = 1;
+      }
+   return( rval);
 }
 
 /* An oversimplified getopt(). */
@@ -584,6 +702,19 @@ static const char *get_arg( const int argc, const char **argv, const int idx)
       return( argv[idx] + 2);
    else
       return( argv[idx + 1]);
+}
+
+static void remove_spaces( char *buff)
+{
+   size_t i = 0, len = strlen( buff);
+
+   while( len && buff[len - 1] <= ' ')
+      len--;
+   while( i < len && buff[i] == ' ')
+      i++;
+   if( i)
+      memmove( buff, buff + i, len - i);
+   buff[len - i] = '\0';
 }
 
 #define IS_POWER_OF_TWO( n)    (((n) & ((n)-1)) == 0)
@@ -601,12 +732,12 @@ int main( const int argc, const char **argv)
 #endif
 {
    double jd, ra, dec;
-   FILE *ifile;
+   FILE *ifile, *json_ofile;
    const char *sof_filename = "mpcorb.sof";
    char buff[400];
    char **ilines = NULL;
    int show_lov = 0;
-   int i, n_ilines = 0, n, max_results = 100;
+   int i, n_ilines = 0, max_n_ilines = 65000, n, max_results = 100;
    int n_lines_printed = 0;
    double tolerance_in_arcsec = 18000.;       /* = five degrees */
    double mag_limit = 22.;
@@ -619,8 +750,9 @@ int main( const int argc, const char **argv)
    int results_array_size = 5;
    char **results = (char **)calloc( results_array_size, sizeof( char *));
    bool is_list_file = false;
-   bool show_header = true;
+   bool show_header = true, is_json_pointing_file = false;
    const char *mpcorb_extracts = "";
+   const char *json_filename = "astcheck.json";
    void *ades_context = init_ades2mpc( );
 
    if( argc < 2)
@@ -628,15 +760,15 @@ int main( const int argc, const char **argv)
       err_message( );
       return( -1);
       }
-#ifdef _WIN32
-   strlcpy_error( _dummy_filename, "astcheck.tmp");
-#else
-   snprintf( _dummy_filename, sizeof( _dummy_filename), "astcheck%d.tmp",
-                        (int)getpid( ));
-#endif
    if( !strcmp( argv[1], "-c"))
       {
       assert( argc > 5);
+#ifdef _WIN32
+      strlcpy_error( _dummy_filename, "astcheck.tmp");
+#else
+      snprintf( _dummy_filename, sizeof( _dummy_filename), "astcheck%d.tmp",
+                        (int)getpid( ));
+#endif
       make_fake_file( argv);
       is_list_file = true;
       max_results = 20000;
@@ -656,6 +788,9 @@ int main( const int argc, const char **argv)
             case 'h':
                show_header = false;
                break;
+            case 'j':
+               json_filename = arg;
+               break;
             case 'r':
                tolerance_in_arcsec = atof( arg);
                break;
@@ -665,6 +800,9 @@ int main( const int argc, const char **argv)
                break;
             case 'm':
                mag_limit = atof( arg);
+               break;
+            case 'a':
+               magnitude_add_on = atof( arg);
                break;
             case 'p':
                data_path = arg;
@@ -677,6 +815,9 @@ int main( const int argc, const char **argv)
                break;
             case 'M':
                max_results = atoi( arg);
+               break;
+            case 'N':
+               max_n_ilines = atoi( arg);
                break;
 #ifdef NOT_READY_QUITE_YET
             case 'e':
@@ -720,7 +861,7 @@ int main( const int argc, const char **argv)
       return( -2);
       }
 
-   ifile = fopen( is_list_file ? _dummy_filename : argv[1], "rb");
+   ifile = fopen( *_dummy_filename ? _dummy_filename : argv[1], "rb");
    if( !ifile)
       {
       printf( "%s not opened\n", argv[1]);
@@ -729,20 +870,29 @@ int main( const int argc, const char **argv)
       }
 
                /* Read astrometry lines and allocate memory for them : */
-   ilines = (char **)malloc( (n_ilines + 1) * sizeof( char *));
-   n_ilines = 0;
-   while( fgets_with_ades_xlation( buff, sizeof( buff), ades_context, ifile))
-      if( !get_mpc_data( buff, &jd, &ra, &dec))
+   ilines = (char **)malloc(  sizeof( char *));
+   while( n_ilines < max_n_ilines && fgets_with_ades_xlation( buff, sizeof( buff), ades_context, ifile))
+      {
+      char pointing_buff[500];
+
+      if( !parse_coverage_json( pointing_buff, buff))
+         *pointing_buff = '\0';
+      else
+         is_json_pointing_file = is_list_file = true;
+      if( *pointing_buff || !get_mpc_data( buff, &jd, &ra, &dec))
          {
+         char *line_to_add = (*pointing_buff ? pointing_buff : buff);
+
          n_ilines++;
          if( IS_POWER_OF_TWO( n_ilines))
             ilines = (char **)realloc( ilines, n_ilines * 2 * sizeof( char *));
-         ilines[n_ilines - 1] = (char *)malloc( strlen( buff) + 1);
-         strcpy( ilines[n_ilines - 1], buff);
+         ilines[n_ilines - 1] = (char *)malloc( strlen( line_to_add) + 1);
+         strcpy( ilines[n_ilines - 1], line_to_add);
          }
+      }
    fclose( ifile);
    free_ades2mpc_context( ades_context);
-   if( is_list_file)
+   if( *_dummy_filename)
 #ifdef _WIN32                /* MS is different. */
       _unlink( _dummy_filename);
 #else
@@ -755,10 +905,48 @@ int main( const int argc, const char **argv)
       return( -1);
       }
    qsort( ilines, n_ilines, sizeof( char **), qsort_mpc_cmp);
+   json_ofile = fopen( json_filename, "wb");
+   if( !json_ofile)
+      {
+      fprintf( stderr, "JSON output file '%s' failed : ", json_filename);
+      perror( NULL);
+      err_message( );
+      return( -1);
+      }
+   fprintf( json_ofile, "{");
    for( n = 0; n < n_ilines; n++)
-      if( strlen( ilines[n]) >= 80
+      {
+      char mpc_code[5], *survey_field_name = NULL;
+      double width, height, duration;
+      bool check_this_line = false;
+
+      if( is_json_pointing_file)
+         {
+         int name_offset = 0;
+
+         sscanf( ilines[n], "%s %lf %lf %lf %lf %lf %lf %lf %n",
+                     mpc_code, &ra, &dec, &width, &height,
+                     &mag_limit, &duration, &jd, &name_offset);
+         ra *= PI / 180.;
+         dec *= PI / 180.;
+         jd += 2400000.5;
+         if( height < 0.)        /* unspecified height = width */
+            height = width;
+         if( width < 0.)        /* unspecified width = height */
+            width = height;
+         tolerance_in_arcsec = (hypot( width, height) * 3600.) / 2.;
+         check_this_line = true;
+         survey_field_name = ilines[n] + name_offset;
+         }
+      else if( strlen( ilines[n]) >= 80
                      && (!n || memcmp( ilines[n], ilines[n - 1], 12))
                      && !get_mpc_data( ilines[n], &jd, &ra, &dec))
+         {
+         check_this_line = true;
+         memcpy( mpc_code, ilines[n] + 77, 3);
+         mpc_code[3] = '\0';
+         }
+      if( check_this_line)
          {
          double earth_loc[6], earth_loc2[6];
          double ra_motion = 0., dec_motion = 0., earth_sun_dist;
@@ -769,17 +957,18 @@ int main( const int argc, const char **argv)
          double jd2;
          const int16_t tolerance = (int16_t)
                           ( tolerance_in_arcsec * 65536 / (360. * 3600.));
-         char tbuff[300];
+         char tbuff[300], json_buff[JSON_BUFF_SIZE];
          int n_results = 0;
          int n_checked = 0;
+         bool is_within_limits;
          bool singleton_observation;
 
          jd += delta_t;
-         if( mpc_station_file && memcmp( ilines[n] + 77, curr_station, 3))
+         if( mpc_station_file && memcmp( mpc_code, curr_station, 3))
             {
             int got_station_data = 0;
 
-            strlcpy_error( curr_station, ilines[n] + 77);
+            strlcpy_error( curr_station, mpc_code);
             curr_station[3] = '\0';
             fseek( mpc_station_file, 0L, SEEK_SET);
             rho_sin_phi = rho_cos_phi = longitude = 0.;
@@ -847,9 +1036,17 @@ int main( const int argc, const char **argv)
          if( verbose)
             printf( "JD %f, RA %f, dec %f\n",
                      jd, ra * 180. / PI, dec * 180. / PI);
-         jd2 = compute_motion( (const char **)ilines + n, n_ilines - n,
+         if( is_list_file)
+            {
+            jd2 = jd + 1e-6;
+            ra_motion = dec_motion = 0.;
+            }
+         else
+            {
+            jd2 = compute_motion( (const char **)ilines + n, n_ilines - n,
                                  &ra_motion, &dec_motion);
-         jd2 += delta_t;
+            jd2 += delta_t;
+            }
          earth_sun_dist =
                get_topo_loc( jd, earth_loc, longitude, rho_cos_phi, rho_sin_phi);
          get_topo_loc( jd2, earth_loc2, longitude, rho_cos_phi, rho_sin_phi);
@@ -869,6 +1066,23 @@ int main( const int argc, const char **argv)
 #endif
                         buff, ra_motion, dec_motion, (jd2 - jd) * 24.);
          n_lines_printed++;
+         if( n)
+            fprintf( json_ofile, ",");
+         remove_spaces( buff);
+         fprintf( json_ofile, "\n  \"%s\":\n  {\n", (survey_field_name ? survey_field_name : buff));
+         if( !is_list_file)
+            fprintf( json_ofile, "    \"single\": %s,\n",
+                  singleton_observation ? "true" : "false");
+         if( !singleton_observation)
+            {
+            fprintf( json_ofile, "    \"rate_ra\": %s,\n",
+                        format_for_json( json_buff, "%.1f", ra_motion));
+            fprintf( json_ofile, "    \"rate_dec\": %s,\n",
+                        format_for_json( json_buff, "%.1f", dec_motion));
+            fprintf( json_ofile, "    \"arc_len\": %s,\n",
+                        format_for_json( json_buff, "%.3f", (jd2 - jd) * 24.));
+            }
+         fprintf( json_ofile, "    \"matches\": [\n");
          for( i = 0; i < n_asteroids; i++)
             {
             const int16_t tolerance2 = tolerance;
@@ -907,7 +1121,12 @@ int main( const int argc, const char **argv)
                   d_dec = dec1 - dec;
                   dist = sqrt( d_ra * d_ra + d_dec * d_dec);
                   dist *= radians_to_arcsec;
-                  if( mag < mag_limit && dist < tolerance_in_arcsec)
+                  if( is_json_pointing_file)
+                     is_within_limits = (fabs( d_ra) < width * (180. / PI) / 2.
+                                      && fabs( d_dec) < height * (180. / PI) / 2.);
+                  else
+                     is_within_limits = dist < tolerance_in_arcsec;
+                  if( mag < mag_limit && is_within_limits)
                      {
                      double computed_ra_motion, computed_dec_motion;
                      double dt_in_hours = (jd2 - jd) * 24.;
@@ -925,8 +1144,9 @@ int main( const int argc, const char **argv)
                            fabs( computed_ra_motion - ra_motion) < motion_tolerance)
                                     || singleton_observation)
                         {
-                        char mpcorb_info[240];
+                        char mpcorb_info[240], packed_desig[15];
                         double ra2, dec2, lov_len, dist_from_lov;
+                        double total_motion, pa_motion;
                         int j;
 
                              /* Compute asteroid posn .1 days later, but same */
@@ -939,7 +1159,37 @@ int main( const int argc, const char **argv)
                         dec2 -= d_dec;     /* along the LOV                        */
                         lov_len = sqrt( ra2 * ra2 + dec2 * dec2);
                         dist_from_lov = (d_ra * dec2 - ra2 * d_dec) / lov_len;
-
+                        memcpy( buff, tbuff, 12);
+                        buff[12] = '\0';
+                        remove_spaces( buff);
+                        if( n_results)
+                           fprintf( json_ofile, ",");
+                        fprintf( json_ofile, "\n      {\n");
+                        fprintf( json_ofile, "        \"object\": \"%s\",\n", buff);
+                        if( !create_mpc_packed_desig( packed_desig, buff))
+                           {
+                           text_search_and_replace( packed_desig, " ", "");
+                           fprintf( json_ofile, "        \"packedID\": \"%s\",\n", packed_desig);
+                           }
+                        fprintf( json_ofile, "        \"ra\": %s,\n",
+                                 format_for_json( json_buff, "%.6f", ra1 * 180. / PI));
+                        fprintf( json_ofile, "        \"dec\": %s,\n",
+                                 format_for_json( json_buff, "%.6f", dec1 * 180. / PI));
+                        fprintf( json_ofile, "        \"mag\": %s,\n",
+                                 format_for_json( json_buff, "%.2f", mag));
+                        fprintf( json_ofile, "        \"rateRA\": %s,\n",
+                                 format_for_json( json_buff, "%.5f", computed_ra_motion / 60.));
+                        fprintf( json_ofile, "        \"rateDec\": %s,\n",
+                                 format_for_json( json_buff, "%.5f", computed_dec_motion / 60.));
+                        total_motion = hypot( computed_ra_motion, computed_dec_motion) / 60.;
+                        pa_motion = atan2( computed_ra_motion, computed_dec_motion);
+                        if( pa_motion < 0.)
+                           pa_motion += 2. * PI;
+                        fprintf( json_ofile, "        \"rate\": %s,\n",
+                                 format_for_json( json_buff, "%.5f", total_motion / 60.));
+                        fprintf( json_ofile, "        \"PA\": %s\n",
+                                 format_for_json( json_buff, "%.2f", pa_motion * 180. / PI));
+                        fprintf( json_ofile, "      }");
                         if( is_list_file)
                            {
                            if( ra1 < 0.)
@@ -1011,6 +1261,7 @@ int main( const int argc, const char **argv)
                      }
                   }
             }
+         fprintf( json_ofile, "    ]\n  }");
          for( i = 0; i < n_results; i++)
             {
             if( i < max_results)
@@ -1023,6 +1274,9 @@ int main( const int argc, const char **argv)
          if( verbose)
             printf( "%d objects had to be checked\n", n_checked);
          }
+      }
+   fprintf( json_ofile, "\n}\n");
+   fclose( json_ofile);
    for( i= 0; i < n_ilines; i++)
       free( ilines[i]);
    free( ilines);

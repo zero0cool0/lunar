@@ -45,6 +45,8 @@ DPT
 #define AU_PER_DAY (86400. * SPEED_OF_LIGHT / AU_IN_KM)
 #endif
 
+#define VERSION_DATE "2026 Sep 29"
+
 #ifdef FRENCH_REPUBLICAN_CLOCK
    #define  hours_per_day      10
    #define minutes_per_hour   100
@@ -58,6 +60,10 @@ DPT
 #define seconds_per_hour   (seconds_per_minute * minutes_per_hour)
 #define seconds_per_day    (seconds_per_hour * hours_per_day)
 #define minutes_per_day    (minutes_per_hour * hours_per_day)
+
+#ifndef DLL_FUNC
+   #include "watdefs.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {

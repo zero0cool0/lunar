@@ -1,7 +1,7 @@
 #  Test input for 'test_des'.  See 'test_des.cpp'.
 # 'Test 1' = test packing;  'Test 2' = test unpacking;  'Test 3' = test both
-# At present,  we have one one-way test.  'Neptune 210' will be packed to
-# N210S;  on unpacking,  it becomes 'Neptune CCX'.
+# At present,  we have one pack-only test.  'Neptune 210' packs to N210S;
+# but on unpacking,  it becomes 'Neptune CCX'.
 # Test 2
 N210S         5 Neptune 210
 # And we have some unpacking-only tests.  The following should
@@ -23,6 +23,8 @@ N210S         5 Neptune 210
 3141P     az  3 3141P-AZ
     DJ65Az9c  2 D/1965 A619-C
     XJ65K810  2 X/1965 K81
+    C417B13A  2 C/417 BA13
+    C042F17C  2 C/42 FC17
      PLS2040  0 2040 P-L
      T3S3141  0 3141 T-3
 00433         1 (433)
@@ -83,3 +85,26 @@ U410S         5 Uranus CDX
     A_RD0aEM  0 A/2027 DZ6190
     C_SEZZZZ  2 C/2028 EA339749
     P_TFzzzz  2 P/2029 FL591673
+# I had cases (now fixed) of eight-character designations starting with P, C,
+# D, X, A,  etc. which were erroneously treated as comet or satellite desigs.
+# These can't be re-packed (and are not really valid packed designations to
+# begin with),  so only unpacking is tested.
+# Test 1
+    Censored -1 Censored
+    P317abo# -1 P317abo#
+    STress17 -1 STress17
+# Asteroid designations before 1800 should be considered to be plain old
+# temporary designations.  (ATLAS,  for example,  has had designations
+# such as A11Ey4K,  which should _not_ be unpacked to 1011 EK604.)
+# Any designations starting with L or later (i.e.,  after 2099) are also
+# assumed temorary;  for example,  PanSTARRS has provided P12Rb3K,
+# which shouldn't be assumed to be 2512 RK273.
+# Test 3
+     H27L44C -1 H27L44C
+     I27R19J  0 1827 RJ19
+     K43DH0Q  0 2043 DQ170
+     L00Wc3E -1 L00Wc3E
+     M42B23N -1 M42B23N
+
+    CI37C05A  2 C/1837 CA5
+    CH50M31V  2 C/1750 MV31

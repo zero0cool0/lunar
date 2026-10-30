@@ -46,9 +46,9 @@ typedef struct
    char line2[83];
    char rms_ra[PIECE_SIZE], rms_dec[PIECE_SIZE], corr[PIECE_SIZE];
    char rms_mag[PIECE_SIZE], rms_time[PIECE_SIZE], unc_time[PIECE_SIZE];
-   char full_ra[PIECE_SIZE], full_dec[PIECE_SIZE], full_mag[9];
+   char full_ra[PIECE_SIZE], full_dec[PIECE_SIZE], full_mag[12];
    char notes[7], program_code[3];
-   char trk_sub[14], obs_id[PIECE_SIZE], trk_id[12], passband[4];
+   char trk_sub[14], obs_id[PIECE_SIZE], trk_id[14], passband[4];
    long double full_t2k;
    int id_set, getting_lines, spacecraft_center;
    int prev_line_passed_through;
@@ -339,7 +339,7 @@ static inline void pack_mpc_reference( char *packed, const char *ref)
       }
    else if( !memcmp( ref, "MPS ", 4))
       {
-      unsigned mps_number = atoi( ref + 4);
+      const unsigned mps_number = atoi( ref + 4);
 
       if( mps_number < 260000)
          {
@@ -356,7 +356,7 @@ static inline void pack_mpc_reference( char *packed, const char *ref)
       }
    else if( !memcmp( ref, "MPC ", 4))
       {
-      unsigned mpc_number = atoi( ref + 4);
+      const unsigned mpc_number = atoi( ref + 4);
 
       if( mpc_number < 110000)
          {
@@ -370,7 +370,7 @@ static inline void pack_mpc_reference( char *packed, const char *ref)
          encode_value_in_mutant_hex( packed + 1, 4, mpc_number - 110000);
          }
       }
-   else if( *ref == '!')
+   else if( *ref == '!' || !memcmp( ref, "JPL", 3))
       {
       memcpy( packed, "     ", 5);
       memcpy( packed, ref, len > 5 ? 5 : len);
@@ -434,32 +434,61 @@ static const char *skip_whitespace( const char *tptr)
    return( tptr);
 }
 
-/* A spacecraft offset in ADES is an optionally signed number fitting
-in 13 characters.  The old punch-card format puts each coordinate into a
-sign plus ten bytes.  If an offset given in ADES won't fit into the
-punch-card constraint,  the following function converts the digital
-part into a nine base-62-digits.  The lead digit then indicates the
-location of the decimal point.  See unpack_oversized_spacecraft_offset()
-in mpc_fmt.c for the reverse function. */
+/* There are several places where ADES allows floating-point values
+that won't fit in the fixed field sizes of the 80-column format.
+For example,  spacecraft offsets are allotted ten bytes in the old format,
+but can be 13 in ADES.  Radar delay/Doppler measurement fields are also
+larger in ADES.  Magnitudes can be up to seven characters in ADES;  five
+are provided in MPC80.  RA/decs can have up to thirteen characters.
 
-static void pack_oversized_spacecraft_offset( char *obuff, const char *ibuff)
+   To pack such numbers into MPC80-sized fields,  the following code
+treats them as integers divided by a power of ten,  with that power
+determined by the decimal point location.  The exponent is stored in the
+first character; A = divisor is 1 (no decimal point found or it was at
+the end of the string);  B = 10 (one digit found after decimal point);
+C = 100, D = 1000,  etc.  The fact that the first character is a letter
+signifies that it's a packed float.
+
+   The integer portion is packed in base 62.  So,  for example, '3.1416'
+could be read as the integer 31416 (8Ai in base 62),  divided by 10000
+(exponent character E),  and stored as 'E8Ai'.  The resulting
+compression allows all of the above ADES cases to be stored in 80-column
+format sized fields.
+
+   See 'mpc_fmt.cpp' for the _unpack_overlong_float() function.      */
+
+static int _pack_overlong_float( char *obuff, size_t osize,
+                                const char *ibuff, const size_t isize)
 {
-   int64_t oval = 0;
-   int i;
+   int rval = 0;
+   const char *decimal_loc = NULL, *endptr = ibuff + isize;
+   int64_t value = 0;
 
-   *obuff = *ibuff;        /* + or - sign */
-   obuff[1] = 'A';         /* assuming no decimal point */
-   for( i = 1; ibuff[i]; i++)
-      if( ibuff[i] >= '0' && ibuff[i] <= '9')
-         oval = oval * 10 + ibuff[i] - '0';
-      else if( ibuff[i] == '.')
-         obuff[1] = (char)( 'A' + i);
-   for( i = 10; i > 1; i--)
+   while( ibuff < endptr && *ibuff == ' ')
+      ibuff++;
+   while( ibuff < endptr)
       {
-      obuff[i] = int_to_mutant_hex_char( (int)( oval % 62));
-      oval /= 62;
+      if( *ibuff >= '0' && *ibuff <= '9')
+         value = value * 10 + (int64_t)( *ibuff - '0');
+      else if( *ibuff == '.' && !decimal_loc)
+         decimal_loc = ibuff;
+      else
+         break;
+      ibuff++;
       }
-   obuff[11] = ' ';
+   *obuff = (char)(decimal_loc ? 'A' + (ibuff - decimal_loc - 1) : 'A');
+   while( ibuff < endptr && *ibuff == ' ')
+      ibuff++;
+   if( ibuff < endptr)
+      rval = -2;
+   while( --osize)
+      {
+      obuff[osize] = int_to_mutant_hex_char( (int)( value % 62));
+      value /= 62;
+      }
+   if( value)
+      rval = -1;
+   return( rval);
 }
 
 static int get_a_line( char *obuff, const size_t obuff_size, ades2mpc_t *cptr)
@@ -467,11 +496,12 @@ static int get_a_line( char *obuff, const size_t obuff_size, ades2mpc_t *cptr)
    if (cptr->rms_ra[0])
       {
       snprintf_err( obuff, obuff_size, "COM Sigmas %s", cptr->rms_ra);
-      if( strcmp( cptr->rms_ra, cptr->rms_dec))
+      if( strcmp( cptr->rms_ra, cptr->rms_dec) || atof( cptr->corr))
          {
          snprintf_append( obuff, obuff_size, "x%s", cptr->rms_dec);
          if( atof( cptr->corr))
             snprintf_append( obuff, obuff_size, ",%s", cptr->corr);
+         cptr->corr[0] = '\0';
          }
       if( cptr->rms_mag[0])
          {
@@ -506,16 +536,12 @@ static int get_a_line( char *obuff, const size_t obuff_size, ades2mpc_t *cptr)
       cptr->trk_sub[0] = cptr->obs_id[0] = cptr->trk_id[0] = '\0';
       strlcat_err( obuff, "\n", obuff_size);
       }
-   else if( cptr->full_ra[0] || cptr->full_dec[0] || cptr->full_t2k != NOT_A_VALID_TIME)
+   else if( cptr->full_ra[0] || cptr->full_dec[0])
       {
-      snprintf_err( obuff, obuff_size, "COM RA/dec %s %s",
+      snprintf_err( obuff, obuff_size, "COM RA/dec %s %s\n",
                (cptr->full_ra[0] ? cptr->full_ra : "-"),
                (cptr->full_dec[0] ? cptr->full_dec : "-"));
-      if( cptr->full_t2k != NOT_A_VALID_TIME)
-         snprintf_append( obuff, obuff_size, " %.15f", (double)cptr->full_t2k);
-      strlcat_err( obuff, "\n", obuff_size);
       cptr->full_ra[0] = cptr->full_dec[0] = '\0';
-      cptr->full_t2k = NOT_A_VALID_TIME;
       }
    else if( cptr->full_dec[0])
       {
@@ -560,8 +586,8 @@ static int get_a_line( char *obuff, const size_t obuff_size, ades2mpc_t *cptr)
          memcpy( cptr->line2, cptr->line, 12);
          memcpy( cptr->line2 + 15, cptr->line + 15, 17);
          if( cptr->spacecraft_center != 399)
-            snprintf_err( cptr->line2 + 69, 9, "%8d", cptr->spacecraft_center);
-         memcpy( cptr->line2 + 77, cptr->line + 77, 3);
+            snprintf_err( cptr->line2 + 69, 4, "%3d", cptr->spacecraft_center);
+         memcpy( cptr->line2 + 72, cptr->line + 72, 8);
          }
       cptr->line[0] = '\0';
       }
@@ -573,6 +599,49 @@ static int get_a_line( char *obuff, const size_t obuff_size, ades2mpc_t *cptr)
    else                         /* got all the lines we'll get */
       cptr->getting_lines = 0;
    return( cptr->getting_lines);
+}
+
+/* See https://minorplanetcenter.net/iau/info/RadarObs.html . The punch-card
+format stores radar values and their uncertainties with implicit decimal
+points.  This function aligns the values according to their specification. */
+
+static void _format_without_decimal( char *optr, const char *ival, const size_t max_decimals,
+                  const size_t max_before_decimal)
+{
+   const char *decimal_loc = strchr( ival, '.');
+   size_t n_decimals = strlen( decimal_loc) - 1;
+   size_t n_before_decimal = decimal_loc - ival;
+
+   assert( decimal_loc);
+   assert( n_before_decimal <= max_before_decimal);
+   decimal_loc++;
+   if( n_decimals > max_decimals)
+      n_decimals = max_decimals;
+   memcpy( optr, decimal_loc, n_decimals);
+   if( n_before_decimal > max_before_decimal)
+      memset( optr - max_before_decimal, '!', max_before_decimal);
+   else
+      {
+      optr -= n_before_decimal;
+      memcpy( optr, ival, n_before_decimal);
+      while( *optr == '0')          /* clobber leading zeroes */
+         *optr++ = ' ';
+      }
+}
+
+static int ades_precision_to_mpc80_precision( const char *prec)
+{
+   int output_format = 999;
+
+   if( !strcmp( prec, "0.001"))
+      output_format = 3;
+   else if( !strcmp( prec, "0.01"))
+      output_format = 2;
+   else if( !strcmp( prec, "0.1"))
+      output_format = 1;
+   else if( *prec == '1')
+      output_format = 0;
+   return( output_format);
 }
 
 /* Returns 1 if it's a properly handled header tag,  0 if it's some
@@ -641,16 +710,68 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
       case ADES_obsTime:
          {
          const bool too_far_in_future = (atoi( tptr) > 2099);
+         char *zptr = strchr( name, 'Z');
 
-         if( move_fits_time( cptr->line + 15, tptr) > 17 || too_far_in_future)
+         if( zptr)
+            *zptr = '\0';
+         cptr->full_t2k = get_time_from_stringl( 0., name, 0, NULL);
+         move_fits_time( cptr->line + 15, tptr);
+         if( too_far_in_future)
+            cptr->line[15] = 'K';
+         }
+         break;
+      case ADES_precRA:       /* reformat RA in the original base-60 */
+         {
+         const int output_format = ades_precision_to_mpc80_precision( name);
+
+         if( output_format != 999)
             {
-            char *zptr = strchr( name, 'Z');
+            const double ra = atof( cptr->line + 32);
+            char tbuff[20];
 
-            if( zptr)
-               *zptr = '\0';
-            cptr->full_t2k = get_time_from_stringl( 0., name, 0, NULL);
-            if( too_far_in_future)
-               cptr->line[15] = 'K';
+            output_angle_to_buff( tbuff, ra / 15., output_format);
+            memcpy( cptr->line + 32, tbuff, 12);
+            }
+         }
+         break;
+      case ADES_precDec:      /* reformat dec in the original base-60 */
+         {
+         const int output_format = ades_precision_to_mpc80_precision( name);
+
+         if( output_format != 999)
+            {
+            const double dec = atof( cptr->line + 45);
+            char tbuff[20];
+
+            output_angle_to_buff( tbuff, dec, output_format);
+            memcpy( cptr->line + 45, tbuff, 11);
+            }
+         }
+         break;
+      case ADES_precTime:     /* reformat time in decimal days */
+         {
+         int prec = atoi( tptr), format_out = 0;
+         const int base_format = FULL_CTIME_MONTHS_AS_DIGITS
+                     | FULL_CTIME_LEADING_ZEROES | FULL_CTIME_YMD
+                     | FULL_CTIME_FORMAT_DAY;
+         char tbuff[25];
+         const int remaps[] = {
+               1,      FULL_CTIME_FORMAT_DAY | FULL_CTIME_6_PLACES,
+               10,     FULL_CTIME_FORMAT_DAY | FULL_CTIME_5_PLACES,
+               100,    FULL_CTIME_FORMAT_DAY | FULL_CTIME_4_PLACES,
+               1000,   FULL_CTIME_FORMAT_DAY | FULL_CTIME_3_PLACES,
+               10000,  FULL_CTIME_FORMAT_DAY | FULL_CTIME_2_PLACES,
+               100000, FULL_CTIME_FORMAT_DAY | FULL_CTIME_1_PLACE };
+         const size_t n_remaps = sizeof( remaps) / sizeof( remaps[0]);
+
+         for( size_t i = 0; !format_out && i < n_remaps; i += 2)
+            if( prec == remaps[i])
+               format_out = remaps[i + 1];
+         if( format_out)
+            {
+            full_ctimel( tbuff, cptr->full_t2k, format_out | base_format);
+            strlcat_error( tbuff, "      ");
+            memcpy( cptr->line + 15, tbuff, 17);
             }
          }
          break;
@@ -683,8 +804,46 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
          cptr->line[14] = 'X';
          break;
       case ADES_disc:
-         if( *tptr == '*')
-            cptr->line[12] = '*';
+         assert( *tptr == '*');     /* may also == '+',  but haven't seen that */
+         cptr->line[12] = *tptr;    /* yet and want to see if it happens */
+         break;
+      case ADES_rcv:
+         cptr->line2[0] = ' ';
+         cptr->line2[14] = 'r';
+         cptr->line[14] = 'R';
+         assert( 3 == strlen( name));
+         memcpy( cptr->line + 77, name, 3);
+         break;
+      case ADES_trx:
+         assert( 3 == strlen( name));
+         memcpy( cptr->line + 68, name, 3);
+         memcpy( cptr->line2 + 68, name, 3);
+         break;
+      case ADES_com:
+         cptr->line2[32] = (*name == '1' ? 'C' : 'S');
+         break;
+      case ADES_frq:
+         _format_without_decimal( cptr->line + 67, name, 1, 5);
+         break;
+      case ADES_delay:
+         _format_without_decimal( cptr->line + 37, name, 10, 5);
+         break;
+      case ADES_rmsDelay:
+         _format_without_decimal( cptr->line2 + 43, name, 4, 10);
+         break;
+      case ADES_doppler:
+         {
+         char *nptr = name;
+
+         if( *nptr == '+' || *nptr == '-')
+            cptr->line[47] = *nptr++;
+         else
+            cptr->line[47] = '+';
+         _format_without_decimal( cptr->line + 58, nptr, 4, 10);
+         }
+         break;
+      case ADES_rmsDoppler:
+         _format_without_decimal( cptr->line2 + 58, name, 4, 11);
          break;
       case ADES_ref:
          if( len < sizeof( name))
@@ -692,11 +851,14 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
          break;
       case ADES_prog:
          {
-         const char *programs = "0123456789!\"#$%&'()*+,-./[\\]^_`{|}~";
-         const int idx = atoi( tptr);
+         const char *programs = "0123456789!\"#$%&'()*+,-./[\\]^_`{|}~<=>?@";
+         const int idx = get_mutant_hex_value( tptr, 2);
 
+         assert( idx >= 0);
          if( idx >=0 && idx <= 34)
             cptr->line[13] = programs[idx];
+         else if( idx < 94)
+            cptr->line[13] = int_to_mutant_hex_char( idx - 32);
          assert( len < sizeof( cptr->program_code));
          strlcpy_err( cptr->program_code, name, sizeof( cptr->program_code));
          }
@@ -788,7 +950,10 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
                rval = 1;
                }
             if( nlen > 11)
-               pack_oversized_spacecraft_offset( &cptr->line2[sign_loc], name);
+               {
+               cptr->line2[sign_loc] = *name;
+               _pack_overlong_float( &cptr->line2[sign_loc + 1], 10, name + 1, nlen - 1);
+               }
             else if( decimal_loc)
                {
                decimal_loc -= (int)(tptr2 - name);
@@ -812,6 +977,7 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
             }
          break;
       case ADES_ra:
+      case ADES_raStar:
          if( *tptr == '+')
             {
             tptr++;
@@ -824,6 +990,7 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
             }
          break;
       case ADES_dec:
+      case ADES_decStar:
          if( *tptr == '-' || *tptr == '+')
             {
             cptr->line[44] = *tptr++;
@@ -923,6 +1090,11 @@ static int process_ades_tag( char *obuff, ades2mpc_t *cptr, const int itag,
       case ADES_obsID:
          assert( len < sizeof( cptr->obs_id));
          strlcpy_err( cptr->obs_id, name, sizeof( cptr->obs_id));
+         if( cptr->ignore_artsat_desigs)     /* for artsats,  set reference to */
+            {                              /* be '!' plus first three chars of  */
+            cptr->line[72] = '!';         /* obsID = date obs was submitted. */
+            memcpy( cptr->line + 73, name, 3);
+            }
          break;
       case ADES_mag:
          memcpy( cptr->line + 65, tptr, (len < 5) ? len : 5);
@@ -996,7 +1168,7 @@ static int check_for_tholen_sigmas( ades2mpc_t *cptr, char *obuff, const char *i
          setup_observation( cptr);
          memcpy( cptr->rms_ra, ibuff + 81, 5);
          memcpy( cptr->rms_dec, ibuff + 87, 5);
-         cptr->rms_ra[5] = cptr->rms_dec[5] = '\0';
+         cptr->rms_ra[5] = cptr->rms_dec[5] = cptr->corr[0] = '\0';
          strlcpy_err( cptr->line, obuff, sizeof( cptr->line));
          obuff[12] = '\0';
          if( !create_mpc_packed_desig( packed_desig, obuff))
@@ -1219,8 +1391,9 @@ int xlate_ades2mpc( void *context, char *obuff, const char *buff)
                   if( cptr->depth == MAX_DEPTH)
                      rval = ADES_DEPTH_MAX;
                   }
-               if( tag_idx == ADES_optical)
-                  {
+               if( tag_idx == ADES_optical || tag_idx == ADES_radar
+                                           || tag_idx == ADES_occultation)
+                  {     /* may someday handle ADES_offset */
                   if( tptr[1] == '/')
                      cptr->getting_lines = rval = 1;
                   else
@@ -1265,25 +1438,6 @@ backward to the point right after the CR in question... fortunately,
 such files are quite rare as of 2020 (they were more common a couple of
 decades earlier.) */
 
-static char *fgets_trimmed( char *buff, const int len, FILE *ifile)
-{
-   char *rval = fgets( buff, len, ifile);
-
-   if( rval)
-      {
-      int i = 0;
-
-      while( buff[i] != 10 && buff[i] != 13 && buff[i])
-         i++;
-      if( buff[i] == 13 && buff[i + 1] != 10)   /* CR terminated */
-         fseek( ifile, 1L + (long)i - (long)strlen( buff), SEEK_CUR);
-      while( i && buff[i - 1] == ' ')
-         i--;           /* drop trailing spaces */
-      buff[i] = '\0';
-      }
-   return( rval);
-}
-
 int fgets_with_ades_xlation( char *buff, const size_t len,
                         void *ades_context, FILE *ifile)
 {
@@ -1292,8 +1446,24 @@ int fgets_with_ades_xlation( char *buff, const size_t len,
 
    if( prev_rval)
       prev_rval = xlate_ades2mpc_in_place( ades_context, buff);
-   while( !prev_rval && fgets_trimmed( buff, (int)len, ifile))
+   while( !prev_rval && fgets( buff, (int)len, ifile))
+      {
+      char *tptr = strstr( buff, "</optical>");
+      size_t i = 0;
+
+      if( tptr)
+         {
+         tptr += 10;
+         fseek( ifile, -(long)strlen( tptr), SEEK_CUR);
+         *tptr = '\0';
+         }
+      while( buff[i] != 10 && buff[i] != 13 && buff[i])
+         i++;
+      while( i && buff[i - 1] == ' ')
+         i--;           /* drop trailing spaces */
+      buff[i] = '\0';
       prev_rval = xlate_ades2mpc_in_place( ades_context, buff);
+      }
    while( *buff && *buff != 10 && *buff != 13)
       buff++;
    *buff = '\0';

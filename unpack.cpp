@@ -2,6 +2,7 @@
 #include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
+#include <assert.h>
 #include "watdefs.h"
 #include "mpc_func.h"
 #include "stringex.h"
@@ -80,8 +81,14 @@ with obuff == NULL just to find out if ibuff is actually a packed desig. */
 static int unpack_provisional_packed_desig( char *obuff, const size_t obuff_size,
                                         const char *ibuff)
 {
-   int rval = 0;
+   int rval = 0, century;
+   const int max_century = 20;   /* nothing past K99 = 2099 */
+   const int min_century = (ibuff[-1] == ' ' ? 18 : 0);
+            /* if it's an asteroid,  nothing before I00 = 1800;
+               but some comets go back to before 0 AD */
 
+   if( obuff)
+      *obuff = '\0';
    if( *ibuff ==  '_' && ibuff[2] >= 'A' && ibuff[2] <= 'Z')
       {
       const int year = mutant_hex_char_to_int( ibuff[1]);
@@ -89,7 +96,7 @@ static int unpack_provisional_packed_desig( char *obuff, const size_t obuff_size
 
       if( year < 0 || desig_num < 0)
          rval = -1;
-      else
+      else if( obuff)
          {
          char letter = 'A' + desig_num % 25;
 
@@ -99,7 +106,9 @@ static int unpack_provisional_packed_desig( char *obuff, const size_t obuff_size
                            letter, 620 + desig_num / 25);
          }
       }
-   else if( *ibuff >= 'G' && *ibuff <= 'K' && isdigit( ibuff[1])
+   else if( (century = mutant_hex_char_to_int( *ibuff)) >= 0
+            && century >= min_century && century <= max_century
+            && isdigit( ibuff[1])
             && isdigit( ibuff[2]) && isupper( ibuff[3])
             && isdigit( ibuff[5]) && (isalpha( ibuff[6]) || ibuff[6] == '0'))
       {
@@ -110,8 +119,8 @@ static int unpack_provisional_packed_desig( char *obuff, const size_t obuff_size
 
       if( obuff)
          {
-         obuff[0] = ((*ibuff >= 'K') ? '2' : '1');          /* millennium */
-         obuff[1] = (char)( '0' + ((*ibuff - 'A') % 10));   /* century   */
+         obuff[0] = (char)( '0' + century / 10);            /* millennium */
+         obuff[1] = (char)( '0' + century % 10);            /* century   */
          obuff[2] = ibuff[1];                               /* decade   */
          obuff[3] = ibuff[2];                               /* year    */
          obuff[4] = ' ';
@@ -123,6 +132,8 @@ static int unpack_provisional_packed_desig( char *obuff, const size_t obuff_size
             }
          else
             obuff[6] = '\0';
+         while( *obuff == '0')         /* first-millennium years */
+            memmove( obuff, obuff + 1, 7);
          output_no = output_no * 10 + ibuff[5] - '0';
          if( output_no)
             snprintf_append( obuff, obuff_size, "%d", output_no);
@@ -131,11 +142,7 @@ static int unpack_provisional_packed_desig( char *obuff, const size_t obuff_size
          }
       }
    else
-      {
-      if( obuff)
-         *obuff = '\0';
       rval = -1;
-      }
    return( rval);
 }
 
@@ -151,6 +158,23 @@ static int is_artsat_desig( const char *desig)
                && isdigit( desig[7]) && isupper( desig[8]))
          return( 1);
    return( 0);
+}
+
+static void roman_numeralize( char *buff, const size_t obuff_size, const int number)
+{
+   const char *roman_digits[10] = { "", "I", "II", "III", "IV",
+            "V", "VI", "VII", "VIII", "IX" };
+   const char *roman_tens[10] = { "", "X", "XX", "XXX", "XL",
+            "L", "LX", "LXX", "LXXX", "XC" };
+   const char *roman_hundreds[10] = { "", "C", "CC", "CCC", "CD",
+            "D", "DC", "DCC", "DCCC", "CM" };
+   const char *roman_thousands[5] = { "", "M", "MM", "MMM", "MMMM" };
+
+   assert( number > 0 && number < 4000);
+   strlcpy_err( buff, roman_thousands[number / 1000], obuff_size);
+   strlcat_err( buff, roman_hundreds[(number / 100) % 10], obuff_size);
+   strlcat_err( buff, roman_tens[(number / 10) % 10], obuff_size);
+   strlcat_err( buff, roman_digits[number % 10], obuff_size);
 }
 
 const char *planet_names_in_english[] = { "Venus", "Earth", "Mars", "Jupiter",
@@ -190,12 +214,6 @@ int unpack_mpc_desig( char *obuff, const char *packed)
          {
          if( obuff)
             {
-            const char *roman_digits[10] = { "", "I", "II", "III", "IV",
-                     "V", "VI", "VII", "VIII", "IX" };
-            const char *roman_tens[10] = { "", "X", "XX", "XXX", "XL",
-                     "L", "LX", "LXX", "LXXX", "XC" };
-            const char *roman_hundreds[10] = { "", "C", "CC", "CCC", "CD",
-                     "D", "DC", "DCC", "DCCC", "CM" };
             const int obj_number = atoi( packed + 1);
 
             for( i = 0; i < 8; i++)
@@ -204,12 +222,8 @@ int unpack_mpc_desig( char *obuff, const char *packed)
                   strlcpy( obuff, planet_names_in_english[i], obuff_size);
                   strlcat( obuff, " ", obuff_size);
                   }
-            if( obj_number / 100)
-               strlcat_err( obuff, roman_hundreds[obj_number / 100], obuff_size);
-            if( (obj_number / 10) % 10)
-               strlcat_err( obuff, roman_tens[(obj_number / 10) % 10], obuff_size);
-            if( obj_number % 10)
-               strlcat_err( obuff, roman_digits[obj_number % 10], obuff_size);
+            roman_numeralize( obuff + strlen( obuff), obuff_size - strlen( obuff),
+                           obj_number);
             }
          rval = OBJ_DESIG_NATSAT_NUMBERED;
          }
@@ -316,15 +330,21 @@ int unpack_mpc_desig( char *obuff, const char *packed)
    if( rval == OBJ_DESIG_OTHER && !memcmp( packed, "    ", 4)
             && strchr( " PCDXA", packed[4]))
       {
-      if( obuff && packed[4] != ' ')
+      const bool is_prefixed = (obuff && packed[4] != ' ');
+      const size_t size_to_use = obuff_size - (packed[4] == ' ' ? 0 : 2);
+
+      if( !unpack_provisional_packed_desig( obuff, size_to_use, packed + 5))
          {
-         *obuff++ = packed[4];
-         *obuff++ = '/';
-         }
-      if( !unpack_provisional_packed_desig( obuff, obuff_size, packed + 5))
+         if( is_prefixed)
+            {
+            memmove( obuff + 2, obuff, strlen( obuff) + 1);
+            obuff[0] = packed[4];
+            obuff[1] = '/';
+            }
          rval = ((packed[4] == ' ' || packed[4] == 'A') ?
                                       OBJ_DESIG_ASTEROID_PROVISIONAL
                                     : OBJ_DESIG_COMET_PROVISIONAL);
+         }
       }
    if( rval == OBJ_DESIG_OTHER && space_mask == 0x1f
             && (digit_mask & 0xf00) == 0xf00 && packed[7] == 'S')

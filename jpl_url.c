@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include <assert.h>
 #include "watdefs.h"
 #include "date.h"
@@ -32,10 +33,13 @@ static void error_exit( void)
    const size_t n_xrefs = sizeof( jpl_xrefs) / sizeof( jpl_xrefs[0]);
    size_t i;
 
-   fprintf( stderr, "Usage : jpl_url <MPC code or YYYY-NNNA desig> <start date> <end date>\n"
-           "See comments in 'jpl_url.c' for details.\n");
+   fputs( "usage : jpl_url obj_desig start_date end_date\n"
+           "   obj_desig = MPC code or YYYY-NNNA (COSPAR) designation\n"
+           "See comments in 'jpl_url.c' for details.\n"
+           "Supported objects:\n\n"
+           "MPC  COSPAR_desig   name\n", stderr);
    for( i = 0; i < n_xrefs; i++)
-      fprintf( stderr, "%s %-11s %s\n", jpl_xrefs[i].mpc_code,
+      fprintf( stderr, "%s  %-11s  %s\n", jpl_xrefs[i].mpc_code,
                                         jpl_xrefs[i].intl_desig,
                                         jpl_xrefs[i].name);
    exit( -1);
@@ -47,9 +51,22 @@ int main( const int argc, const char **argv)
    const size_t n_xrefs = sizeof( jpl_xrefs) / sizeof( jpl_xrefs[0]);
    double jd1, jd2;
    const double min_jd = 2447892.5;    /* 1990 Jan 1 */
+   bool output_command = false;
 
    if( argc < 4)
       error_exit( );
+   for( int j = 1; j < argc; j++)
+      if( argv[j][0] == '-')
+         switch( argv[j][1])
+            {
+            case 'c':
+               output_command = true;
+               break;
+            default:
+               fprintf( stderr, "'%s' : unrecognized option\n", argv[j]);
+               error_exit( );
+               break;
+            }
    while( i < n_xrefs && strcmp( argv[1], jpl_xrefs[i].mpc_code)
                       && strcmp( argv[1], jpl_xrefs[i].intl_desig)
                       && atoi( argv[1]) != jpl_xrefs[i].jpl_desig)
@@ -68,12 +85,15 @@ int main( const int argc, const char **argv)
       fprintf( stderr, "Can't go before JD %f\n", min_jd);
       error_exit( );
       }
+   if( output_command)
+      printf( "wget -O /tmp/eph.txt \"");
    printf( "https://ssd.jpl.nasa.gov/api/horizons.api?format=text");
    printf( "&COMMAND='%d'", jpl_xrefs[i].jpl_desig);
    printf( "&OBJ_DATA='YES'&TABLE_TYPE='V'");
    printf( "&START_TIME='JD%f'", jd1);
    printf( "&STOP_TIME='JD%f'", jd2);
    printf( "&STEP_SIZE='%d'", (int)( (jd2 - jd1) * 10. + 0.5));
-   printf( "&VEC_TABLE='2'&VEC_LABELS='NO'\n");
+   printf( "&VEC_TABLE='2'&VEC_LABELS='NO'%s\n",
+                  output_command ? "\"" : "");
    return( 0);
 }
